@@ -1,198 +1,168 @@
 # Team Assemble
 
-A modern web application for managing team members, roles, and sprint planning with interactive role rotation. Built with React, TypeScript, Vite, and Supabase.
+A modern web app for managing team members, roles, and sprint planning with interactive role rotation and animated presentation mode. Built with React 19, TypeScript, Vite, and Supabase.
 
 ## Features
 
-- **Team Management**: Create and manage team accounts with secure authentication
-- **Member Management**: Add, update, and manage team members with avatars
-- **Role Management**: Define and assign roles to team members
-- **Sprint Planning**: Plan and organize sprints with role rotation capabilities
-- **Interactive Dashboard**: View team metrics and sprint overview at a glance
-- **Role Rotation**: Automatically rotate roles among team members with a roulette-style picker
-- **Social Sharing**: Share sprint presentations with rich previews on social media (Twitter, Slack, Discord)
-- **Screenshot Capture**: Download or copy presentation results as images
-- **Public Presentations**: Share presentation URLs that anyone can view
-- **Offline Support**: Seamlessly switch between online and offline modes with sample data
-- **Responsive Design**: Works great on desktop, tablet, and mobile devices
-- **Real-time Sync**: Data syncs with Supabase backend in real-time
+- **Team Authentication** — Create or log in to a team with a name and password; sessions persist across refreshes
+- **Squad Management** — Add, update, and remove team members; assign avatars
+- **Role Management** — Define roles with icons and colors; assign members per sprint
+- **Sprint Planner** — Bulk-create or individually add sprints with:
+  - Custom sprint name prefix (e.g. `PI Sprint`) with automatic sequential numbering
+  - Seeded numbering — if your prefix already ends in a number (e.g. `PI Sprint 5`), new sprints continue from that number
+  - Configurable duration in business days or calendar days
+  - **Exclude Weekends** toggle — checked by default (weekday-only counting); uncheck to count every calendar day
+  - Sequential or random role rotation strategies
+  - Drag-and-drop sprint reordering
+  - Bulk delete with confirmation
+- **Animated Presentation Mode** — Role-reveal animation with confetti; supports manual, sequential, and random assignment strategies
+- **Screenshot & Sharing** — Capture the finished presentation as a PNG with avatars reliably rendered; copy to clipboard or download; share via the Web Share API
+- **Public Presentations** — Share a `?replay=<sprint-id>` link that anyone can view without logging in
+- **UX-Friendly Error Messages** — All API and Supabase errors are mapped to plain-language messages via a shared constant library
+- **Offline Support** — Falls back to locally cached data when the Supabase connection is unavailable; shows an offline banner
+- **Responsive Design** — Works on desktop, tablet, and mobile
 
 ## Tech Stack
 
-- **Frontend Framework**: React 19
-- **Language**: TypeScript
-- **Build Tool**: Vite
-- **State Management**: Zustand
-- **Styling**: Tailwind CSS + PostCSS
-- **Backend**: Supabase (PostgreSQL)
-- **Drag & Drop**: @hello-pangea/dnd
-- **UI Components**: Lucide React Icons
-- **Animation**: Framer Motion
-- **Screenshot**: html2canvas
-- **Meta Tags**: react-helmet-async
-- **Utilities**: date-fns, clsx, tailwind-merge
+| Layer | Library / Tool |
+|---|---|
+| Framework | React 19 |
+| Language | TypeScript |
+| Build | Vite |
+| State | Zustand |
+| Styling | Tailwind CSS + PostCSS |
+| Backend | Supabase (PostgreSQL + Storage) |
+| Routing | React Router v7 |
+| Animation | Framer Motion |
+| Drag & Drop | @hello-pangea/dnd |
+| Screenshot | html2canvas |
+| Icons | Lucide React |
+| Date math | date-fns |
+| Utilities | clsx, tailwind-merge |
+| Confetti | canvas-confetti |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- npm or yarn
-- Supabase account (for backend)
+- yarn (or npm)
+- A [Supabase](https://supabase.com) project
 
 ### Installation
 
-1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/christian-crisologo-lrn/team-assemble.git
 cd team-assemble
+yarn install
 ```
 
-2. Install dependencies:
+### Environment Variables
+
+Copy `.env.example` to `.env` and fill in your Supabase credentials:
+
 ```bash
-npm install
+cp .env.example .env
 ```
 
-3. Set up environment variables:
-Create a `.env.local` file in the root directory with your Supabase credentials:
-```
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```env
+VITE_SUPABASE_URL=your-project-url-here
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
-4. Start the development server:
+### Database Setup
+
+Run `supabase/schema.sql` in your Supabase SQL editor to create the required tables, then run `supabase/storage-policy.sql` to configure storage policies for the `squad-previews` bucket.
+
+### Development
+
 ```bash
-npm run dev
+yarn dev        # start dev server at http://localhost:5173
+yarn build      # production build (tsc + vite)
+yarn preview    # preview production build locally
+yarn lint       # run ESLint
 ```
 
-The app will be available at `http://localhost:5173`
-
-## Usage
-
-### Login / Create Account
-
-1. On first load, you'll be presented with the login screen
-2. Enter a team name and password
-3. Create a new team or login with existing credentials
-
-### Dashboard
-
-View team overview including:
-- Total team members
-- Active roles
-- Sprint statistics
-- Quick navigation to other sections
-
-### Squad Management
-
-- Add new team members
-- Edit member information
-- Assign avatars to members
-- Remove members from the team
-
-### Roles
-
-- Create and manage team roles
-- Assign members to roles
-- Track role assignments across sprints
-
-### Sprint Planning
-
-- Create sprints with specific dates
-- Plan and rotate roles within sprints
-- Use the interactive roulette to randomly assign roles
-- View sprint details and team assignments
-
-### Presentation Mode
-
-- Access the presentation page at `/presentation` without authentication
-- Useful for displaying team info on large screens or during meetings
-
-## Development
-
-### Available Scripts
-
-- `npm run dev` - Start development server with HMR
-- `npm run build` - Build for production
-- `npm run lint` - Run ESLint
-- `npm run preview` - Preview production build locally
-
-### Project Structure
+## Project Structure
 
 ```
 src/
-├── components/          # Reusable React components
-│   ├── features/       # Feature-specific components
-│   ├── layout/         # Layout components
-│   └── ui/             # UI primitive components
-├── pages/              # Page components
-├── store/              # Zustand state management
-├── lib/                # External library configurations
-├── types/              # TypeScript type definitions
-├── utils/              # Utility functions
-└── App.tsx             # Main app component
+├── components/
+│   ├── features/squad/   # MemberCard
+│   ├── layout/           # Layout, OfflineBanner
+│   └── ui/               # Button, Card, Dialog, Input, IconPicker, Preloader, …
+├── pages/
+│   ├── Dashboard.tsx
+│   ├── Login.tsx
+│   ├── Presentation.tsx  # Animated role-reveal + share/copy
+│   ├── Roles.tsx
+│   ├── SprintPlanner.tsx # Bulk sprint creation with rotation
+│   └── Squad.tsx
+├── store/
+│   ├── useSprintStore.ts # Zustand store — teams, members, roles, sprints
+│   └── useUIStore.ts
+├── lib/
+│   └── supabase.ts
+├── types/
+│   └── index.ts
+└── utils/
+    ├── errors.ts         # ERROR_MESSAGES constants + getFriendlyErrorMessage
+    ├── rotation.ts       # Sequential and random role rotation algorithms
+    ├── string.ts
+    └── weekday.ts        # addWeekdays / countWeekdays (start-date inclusive)
 ```
+
+## Sprint Planner — Key Behaviours
+
+### Day Counting
+
+`addWeekdays(startDate, n)` counts the start date as day 1, so 10 business days from **Aug 2** ends on **Aug 13** (not Aug 14).
+
+With **Exclude Weekends** unchecked, calendar days are used: 10 days from Aug 2 ends on Aug 11.
+
+### Sprint Naming
+
+Enter a prefix such as `Sprint` → sprints are named `Sprint 1`, `Sprint 2`, …
+
+Enter a seeded name such as `PI Sprint 5` → new sprints continue as `PI Sprint 6`, `PI Sprint 7`, … Existing sprint names in the same series are respected; numbering always continues from the highest existing number or the seed, whichever is greater.
+
+## Presentation Mode — Screenshot & Copy
+
+Avatar images are pre-fetched and converted to base64 data URLs so `html2canvas` can render them reliably regardless of CORS restrictions. A `data-member-id` attribute on each `<img>` element is used to patch the cloned DOM via the `onclone` callback before the canvas is rendered. Animations are suspended during capture so no fade or scale transition partially hides a card in the exported image.
+
+## Error Handling
+
+All user-facing error strings live in `src/utils/errors.ts`:
+
+```ts
+ERROR_MESSAGES.invalidCredentials   // "Invalid team name or password"
+ERROR_MESSAGES.loginFailed          // "We could not log you in right now…"
+ERROR_MESSAGES.createTeamFailed     // "We could not create your team…"
+ERROR_MESSAGES.presentationLoadFailed
+ERROR_MESSAGES.duplicateName
+ERROR_MESSAGES.notFound
+ERROR_MESSAGES.generic
+```
+
+`getFriendlyErrorMessage(error, { action, fallback })` maps raw Supabase / network errors to the appropriate constant based on the error message content (network failure, duplicate key, permission denied, etc.).
 
 ## Database Schema
 
-The app uses PostgreSQL with Supabase. Key tables include:
+Key tables (all prefixed `lrn_`):
 
-- **teams**: Team accounts with authentication
-- **members**: Team members with profile information
-- **roles**: Role definitions for team assignments
-- **sprints**: Sprint planning and tracking
-- **assignments**: Member-to-role assignments within sprints
+| Table | Purpose |
+|---|---|
+| `lrn_teams` | Team accounts |
+| `lrn_members` | Member profiles |
+| `lrn_team_members` | Many-to-many: team ↔ member |
+| `lrn_roles` | Role definitions per team |
+| `lrn_sprints` | Sprint records with assignments JSON |
 
-See `supabase/schema.sql` for the complete database schema.
-
-## Features in Detail
-
-### Role Roulette
-
-The sprint planning page features an interactive role selection roulette that:
-- Displays all available roles
-- Spins and selects a random role
-- Animates with confetti on selection
-- Can be used repeatedly for different member assignments
-
-### Social Sharing & Previews
-
-Share your team presentations with beautiful previews:
-- **Screenshot Capture**: Download presentation results as images
-- **Copy to Clipboard**: Quickly copy images for sharing
-- **Public URLs**: Share presentation links with `?replay=<sprint-id>` parameter
-- **Rich Previews**: Automatic Open Graph previews on Twitter, Slack, Discord, etc.
-- **No Login Required**: Public presentation links work without authentication
-
-For detailed setup and usage, see [SHARING.md](./SHARING.md).
-
-### Offline Mode
-
-When the Supabase connection is unavailable, the app:
-- Automatically switches to offline mode
-- Uses sample data for demonstration
-- Shows an offline banner notification
-- Syncs data once connection is restored
-
-### Authentication
-
-The app uses simple username/password authentication:
-- Teams are identified by unique names
-- Passwords are securely stored in Supabase
-- Sessions persist across browser refreshes
-
-## Documentation
-
-- [SHARING.md](./SHARING.md) - Social sharing setup and usage guide
-- [IMPLEMENTATION.md](./IMPLEMENTATION.md) - Technical implementation details
-- [supabase/schema.sql](./supabase/schema.sql) - Database schema
+See [`supabase/schema.sql`](./supabase/schema.sql) for the full schema and [`supabase/storage-policy.sql`](./supabase/storage-policy.sql) for storage policies.
 
 ## Browser Support
 
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
+Chrome, Firefox, Safari, and Edge (latest stable versions).
 
 ## License
 
