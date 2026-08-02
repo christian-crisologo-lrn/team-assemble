@@ -1,15 +1,16 @@
 import type { Member } from '../../../types';
 import { Card, CardContent } from '../../ui/card';
 import { Button } from '../../ui/button';
-import { User, Edit2, Trash2 } from 'lucide-react';
+import { User, Edit2, Trash2, History } from 'lucide-react';
 
 interface MemberCardProps {
     member: Member;
     onEdit?: (member: Member) => void;
     onRemove?: (id: string) => void;
+    onViewHistory?: (member: Member) => void;
 }
 
-export function MemberCard({ member, onEdit, onRemove }: MemberCardProps) {
+export function MemberCard({ member, onEdit, onRemove, onViewHistory }: MemberCardProps) {
     return (
         <Card className="overflow-hidden hover:bg-accent/5 transition-colors group relative">
             <CardContent className="p-4 flex items-center justify-between">
@@ -32,6 +33,11 @@ export function MemberCard({ member, onEdit, onRemove }: MemberCardProps) {
                 </div>
 
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {onViewHistory && (
+                        <Button variant="ghost" size="icon" onClick={() => onViewHistory(member)} title="View role history">
+                            <History className="h-4 w-4" />
+                        </Button>
+                    )}
                     {onEdit && (
                         <Button variant="ghost" size="icon" onClick={() => onEdit(member)}>
                             <Edit2 className="h-4 w-4" />
