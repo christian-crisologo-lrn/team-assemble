@@ -1,12 +1,36 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { useSprintStore } from '../store/useSprintStore';
+import { useUIStore, type PresentationAnimation } from '../store/useUIStore';
 import { capitalizeFirst } from '../utils/string';
-import { Calendar, Play, Users, Shield } from 'lucide-react';
+import { Calendar, Play, Users, Shield, Sparkles, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+
+const animationOptions: Array<{
+    value: PresentationAnimation;
+    label: string;
+    description: string;
+}> = [
+    {
+        value: 'graffiti',
+        label: 'Simple Graffiti',
+        description: 'Clean reveal with the current signature look.',
+    },
+    {
+        value: 'rocketship',
+        label: 'Rocketship Launch',
+        description: 'Launch-style motion with a dramatic takeoff feel.',
+    },
+    {
+        value: 'jumping-avatars',
+        label: 'Jumping Avatars',
+        description: 'Members bounce into view with more playful energy.',
+    },
+];
 
 export default function Dashboard() {
     const { currentTeam, members, roles, sprints, logout } = useSprintStore();
+    const { presentationAnimation, setPresentationAnimation } = useUIStore();
     const navigate = useNavigate();
 
     return (
@@ -57,7 +81,7 @@ export default function Dashboard() {
                         <CardHeader>
                             <div className="space-y-3">
                                 <CardTitle className="flex justify-between items-center flex-wrap gap-2">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <span>{activeSprint.name}</span>
                                         <div className="flex items-center gap-1">
                                             <Button
@@ -80,6 +104,35 @@ export default function Dashboard() {
                                             >
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-muted-foreground"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" /></svg>
                                             </Button>
+                                        </div>
+                                        <div className="flex items-center gap-2 rounded-xl border border-border bg-background/80 px-3 py-1.5">
+                                            <Sparkles className="h-4 w-4 text-primary" />
+                                            <select
+                                                className="bg-transparent text-sm outline-none"
+                                                value={presentationAnimation}
+                                                onChange={(e) => setPresentationAnimation(e.target.value as PresentationAnimation)}
+                                                aria-label="Presentation animation"
+                                            >
+                                                {animationOptions.map((option) => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <div className="group relative">
+                                                <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                                                <div className="absolute left-1/2 top-6 z-20 hidden w-72 -translate-x-1/2 rounded-xl border bg-popover p-3 text-left text-xs text-muted-foreground shadow-xl group-hover:block">
+                                                    <p className="font-semibold text-foreground mb-2">Presentation animations</p>
+                                                    <div className="space-y-2">
+                                                        {animationOptions.map((option) => (
+                                                            <div key={option.value}>
+                                                                <span className="font-medium text-foreground">{option.label}</span>
+                                                                <p>{option.description}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <Button size="sm" variant="outline" onClick={() => navigate('/planning')}>

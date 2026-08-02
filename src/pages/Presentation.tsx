@@ -9,7 +9,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { rotateSequential, rotateRandom } from '../utils/rotation';
 import { DynamicIcon } from '../components/ui/IconPicker';
 import { supabase } from '../lib/supabase';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Rocket } from 'lucide-react';
 import type { Member, Role, Sprint, Team } from '../types';
 import { ERROR_MESSAGES, getFriendlyErrorMessage } from '../utils/errors';
 import { capitalizeFirst } from '../utils/string';
@@ -39,7 +39,7 @@ async function waitForImagesToLoad(container: HTMLElement): Promise<void> {
 
 export default function Presentation() {
     const { currentTeam: storeTeam, members: storeMembers, roles: storeRoles, sprints: storeSprints, startSprint } = useSprintStore();
-    const { setSidebarCollapsed } = useUIStore();
+    const { setSidebarCollapsed, presentationAnimation } = useUIStore();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const replayId = searchParams.get('replay');
@@ -125,7 +125,11 @@ export default function Presentation() {
     const [isSnapshotMode, setIsSnapshotMode] = useState(false);
     const [copySuccess, setCopySuccess] = useState(false);
     const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
+    // Ref mirror so handleCapture's onclone always reads the latest blobs (no stale closure)
+    const avatarBlobsRef = useRef<Record<string, string>>({});
     const resultsRef = useRef<HTMLDivElement>(null);
+    const isRocketAnimation = presentationAnimation === 'rocketship';
+    const isJumpingAvatarAnimation = presentationAnimation === 'jumping-avatars';
 
     // Derived URLs for sharing
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -155,6 +159,7 @@ export default function Presentation() {
             });
             await Promise.all(promises);
             setAvatarBlobs(dataUrls);
+            avatarBlobsRef.current = dataUrls;
         };
 
         if (members.length > 0) {
@@ -287,9 +292,10 @@ export default function Presentation() {
         setUploadingImage(true);
         setIsSnapshotMode(true);
         try {
-            // Force a static render before snapshot so fade/stagger animations don't hide avatars.
-            await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
-            await new Promise(resolve => setTimeout(resolve, 80));
+            // Double rAF: first flush React's state update to the DOM, second ensures paint.
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))));
+            // Give framer-motion enough time to animate to the explicit resting values (duration: 0).
+            await new Promise(resolve => setTimeout(resolve, 300));
             await waitForImagesToLoad(resultsRef.current);
 
             const canvas = await html2canvas(resultsRef.current, {
@@ -299,14 +305,41 @@ export default function Presentation() {
                 backgroundColor: '#ffffff',
                 logging: false,
                 imageTimeout: 15000,
-                onclone: (_doc, element) => {
-                    // Patch img elements in the cloned DOM with pre-loaded data URLs
-                    const imgs = Array.from(element.querySelectorAll('img[data-member-id]')) as HTMLImageElement[];
-                    imgs.forEach((img) => {
+                onclone: (_doc, clonedEl) => {
+                    // 1. Strip every inline transform/opacity framer-motion injected so nothing
+                    //    is off-screen, invisible, or mid-animation in the cloned DOM.
+                    const allEls = Array.from(clonedEl.querySelectorAll('*')) as HTMLElement[];
+                    allEls.forEach(el => {
+                        if (el.style.transform) el.style.transform = 'none';
+                        if (el.style.opacity !== '' && parseFloat(el.style.opacity) < 1) el.style.opacity = '1';
+                        if (el.style.visibility && el.style.visibility !== 'visible') el.style.visibility = 'visible';
+                    });
+
+                    // 2. Replace every avatar <img> with a background-image <div>.
+                    //    html2canvas reliably renders CSS background-image with data URLs,
+                    //    but frequently drops <img> elements inside overflow:hidden + border-radius.
+                    const imgs = Array.from(clonedEl.querySelectorAll('img[data-member-id]')) as HTMLImageElement[];
+                    imgs.forEach(img => {
                         const memberId = img.getAttribute('data-member-id');
-                        if (memberId && avatarBlobs[memberId]) {
-                            img.src = avatarBlobs[memberId];
-                        }
+                        const dataUrl = memberId ? avatarBlobsRef.current[memberId] : null;
+                        if (!dataUrl || !img.parentElement) return;
+
+                        const container = img.parentElement;
+                        // Open the clipping so the background image isn't cut off
+                        container.style.overflow = 'visible';
+                        container.style.borderRadius = '50%';
+
+                        // Swap the <img> for a div with background-image
+                        const replacement = document.createElement('div');
+                        replacement.style.cssText = [
+                            'width:100%',
+                            'height:100%',
+                            `background-image:url('${dataUrl}')`,
+                            'background-size:cover',
+                            'background-position:center',
+                            'border-radius:50%',
+                        ].join(';');
+                        container.replaceChild(replacement, img);
                     });
                 },
             });
@@ -472,6 +505,21 @@ export default function Presentation() {
 
     const assignedMemberId = newAssignments[currentRole.id];
     const assignedMember = members.find(m => m.id === assignedMemberId);
+    const revealContainerInitial = isRocketAnimation
+        ? { opacity: 0, scale: 0.4, y: 220, rotate: -8 }
+        : { opacity: 0, scale: 0.6, y: 50 };
+    const revealContainerAnimate = isRocketAnimation
+        ? { opacity: 1, scale: 1, y: 0, rotate: 0 }
+        : { opacity: 1, scale: 1, y: 0 };
+    const revealContainerExit = isRocketAnimation
+        ? { opacity: 0, scale: 0.9, y: -180, rotate: 6 }
+        : { opacity: 0, scale: 0.8, y: -50 };
+    const avatarJumpAnimation = isJumpingAvatarAnimation
+        ? { y: [0, -24, 0, -12, 0], scale: [1, 1.04, 1, 1.02, 1] }
+        : { y: [0, -10, 0] };
+    const avatarJumpTransition = isJumpingAvatarAnimation
+        ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' as const }
+        : { duration: 3, repeat: Infinity, ease: 'easeInOut' as const };
 
     return (
         <div className="flex flex-col items-center justify-center min-h-[100vh] space-y-6 p-4">
@@ -503,9 +551,9 @@ export default function Presentation() {
                                 return (
                                     <motion.div
                                         key={role.id}
-                                        initial={isSnapshotMode ? false : { opacity: 0, scale: 0.5, y: 20 }}
-                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                        transition={isSnapshotMode ? { duration: 0 } : { duration: 0.6, delay: index * 0.1, ease: 'easeOut' }}
+                                        initial={isSnapshotMode ? false : isRocketAnimation ? { opacity: 0, scale: 0.65, y: 80 } : { opacity: 0, scale: 0.5, y: 20 }}
+                                        animate={isRocketAnimation ? { opacity: 1, scale: 1, y: 0 } : { opacity: 1, scale: 1, y: 0 }}
+                                        transition={isSnapshotMode ? { duration: 0 } : isRocketAnimation ? { duration: 0.75, delay: index * 0.12, ease: 'easeOut' } : { duration: 0.6, delay: index * 0.1, ease: 'easeOut' }}
                                         whileHover={{ scale: 1.05, transition: { duration: 0.2 } }}
                                     >
                                         <Card className="border-primary/20 bg-primary/5 overflow-visible relative mt-4 hover:shadow-xl hover:border-primary/50 transition-all duration-300">
@@ -517,12 +565,14 @@ export default function Presentation() {
                                                 {m ? (
                                                     <motion.div
                                                         className="flex flex-col items-center gap-2"
-                                                        initial={isSnapshotMode ? false : { scale: 0 }}
-                                                        animate={{ scale: 1 }}
-                                                        transition={isSnapshotMode ? { duration: 0 } : { duration: 0.4, delay: index * 0.1 + 0.2 }}
+                                                        initial={isSnapshotMode ? false : isRocketAnimation ? { scale: 0.6, y: 36, opacity: 0 } : { scale: 0 }}
+                                                        animate={isRocketAnimation ? { scale: 1, y: 0, opacity: 1 } : { scale: 1 }}
+                                                        transition={isSnapshotMode ? { duration: 0 } : isRocketAnimation ? { duration: 0.55, delay: index * 0.1 + 0.2 } : { duration: 0.4, delay: index * 0.1 + 0.2 }}
                                                     >
                                                         <motion.div
                                                             className="h-14 w-14 md:h-16 md:w-16 rounded-full overflow-hidden bg-secondary border-2 border-primary/20 ring-2 ring-primary/0 hover:ring-primary/50 transition-all"
+                                                            animate={isSnapshotMode ? { y: 0, scale: 1 } : avatarJumpAnimation}
+                                                            transition={isSnapshotMode ? { duration: 0 } : avatarJumpTransition}
                                                             whileHover={{ boxShadow: "0 0 20px rgba(168, 85, 247, 0.4)" }}
                                                         >
                                                             {m.avatar_url ? (
@@ -606,10 +656,10 @@ export default function Presentation() {
                 <AnimatePresence mode="wait">
                     <motion.div
                         key={currentRole.id}
-                        initial={{ opacity: 0, scale: 0.6, y: 50 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.8, y: -50 }}
-                        transition={{ duration: 2, ease: "easeInOut" }}
+                        initial={revealContainerInitial}
+                        animate={revealContainerAnimate}
+                        exit={revealContainerExit}
+                        transition={isRocketAnimation ? { duration: 1.5, ease: 'easeOut' } : { duration: 2, ease: 'easeInOut' }}
                         className="w-full max-w-2xl text-center flex flex-col items-center justify-center"
                     >
                         <h3 className="text-5xl md:text-6xl font-extrabold mb-12 text-primary">
@@ -622,23 +672,27 @@ export default function Presentation() {
                         >
                             <motion.div
                                 className="absolute inset-0 opacity-5 flex items-center justify-center pointer-events-none"
-                                animate={{ rotate: 360 }}
-                                transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                                animate={isRocketAnimation ? { y: [120, -200], opacity: [0, 0.12, 0] } : { rotate: 360 }}
+                                transition={isRocketAnimation ? { duration: 2.2, repeat: Infinity, ease: 'easeOut' } : { duration: 20, repeat: Infinity, ease: 'linear' }}
                             >
-                                <DynamicIcon name={currentRole.icon || 'Shield'} className="h-48 w-48" />
+                                {isRocketAnimation ? (
+                                    <Rocket className="h-40 w-40" />
+                                ) : (
+                                    <DynamicIcon name={currentRole.icon || 'Shield'} className="h-48 w-48" />
+                                )}
                             </motion.div>
 
                             {assignedMember ? (
                                 <motion.div
                                     className="z-10 flex flex-col items-center gap-4"
-                                    initial={{ scale: 0, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    transition={{ duration: 1.5, ease: "easeOut" }}
+                                    initial={isRocketAnimation ? { scale: 0.6, opacity: 0, y: 60 } : { scale: 0, opacity: 0 }}
+                                    animate={isRocketAnimation ? { scale: 1, opacity: 1, y: 0 } : { scale: 1, opacity: 1 }}
+                                    transition={isRocketAnimation ? { duration: 1.1, ease: 'easeOut' } : { duration: 1.5, ease: 'easeOut' }}
                                 >
                                     <motion.div
                                         className="relative h-40 w-40 rounded-full overflow-hidden bg-secondary mb-2 border-4 border-primary shadow-2xl ring-4 ring-primary/20"
-                                        animate={{ y: [0, -10, 0] }}
-                                        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                                        animate={avatarJumpAnimation}
+                                        transition={avatarJumpTransition}
                                         whileHover={{ scale: 1.1, boxShadow: "0 0 30px rgba(168, 85, 247, 0.6)" }}
                                     >
                                         {assignedMember.avatar_url ? (
