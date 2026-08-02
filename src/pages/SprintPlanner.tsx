@@ -37,6 +37,7 @@ export default function SprintPlanner() {
     const { members, roles, sprints, addSprints, updateSprint, setSprints, deleteSprints } = useSprintStore();
     const [step, setStep] = useState(0); // 0 = List View, 1 = Config, 2 = Strategy, 3 = Review
     const [editingSprint, setEditingSprint] = useState<Omit<Sprint, 'team_id'> | null>(null);
+    const [adjustSubsequentDates, setAdjustSubsequentDates] = useState(false);
     const navigate = useNavigate();
 
     // Selection State
@@ -123,16 +124,66 @@ export default function SprintPlanner() {
         await setSprints(newItems);
     };
 
+    const getSprintDurationMs = (sprint: Pick<Sprint, 'start_date' | 'end_date'>) => {
+        return new Date(sprint.end_date).getTime() - new Date(sprint.start_date).getTime();
+    };
+
+    const getOrderedSprintsForEditing = (candidate: Omit<Sprint, 'team_id'>) => {
+        const exists = sprints.some(s => s.id === candidate.id);
+        const merged = exists
+            ? sprints.map(s => s.id === candidate.id ? { ...s, ...candidate } : s)
+            : [...sprints, candidate];
+
+        return merged.sort(
+            (a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+        );
+    };
+
+    const getSubsequentSprintCount = (candidate: Omit<Sprint, 'team_id'> | null) => {
+        if (!candidate) return 0;
+        const ordered = getOrderedSprintsForEditing(candidate);
+        const currentIndex = ordered.findIndex(s => s.id === candidate.id);
+        return currentIndex === -1 ? 0 : Math.max(0, ordered.length - currentIndex - 1);
+    };
+
     const saveEdit = async () => {
-        if (editingSprint) {
-            const exists = sprints.some(s => s.id === editingSprint.id);
+        if (!editingSprint) return;
+
+        const exists = sprints.some(s => s.id === editingSprint.id);
+
+        if (adjustSubsequentDates && getSubsequentSprintCount(editingSprint) > 0) {
+            const ordered = getOrderedSprintsForEditing(editingSprint);
+            const currentIndex = ordered.findIndex(s => s.id === editingSprint.id);
+            const subsequent = ordered.slice(currentIndex + 1);
+
             if (exists) {
                 await updateSprint(editingSprint.id, editingSprint);
             } else {
                 await addSprints([editingSprint]);
             }
-            setEditingSprint(null);
+
+            let previousEnd = new Date(editingSprint.end_date);
+
+            for (const sprint of subsequent) {
+                const durationMs = getSprintDurationMs(sprint);
+                const nextStart = addDays(previousEnd, 1);
+                const nextEnd = new Date(nextStart.getTime() + durationMs);
+
+                await updateSprint(sprint.id, {
+                    start_date: nextStart.toISOString(),
+                    end_date: nextEnd.toISOString(),
+                });
+
+                previousEnd = nextEnd;
+            }
+        } else if (exists) {
+            await updateSprint(editingSprint.id, editingSprint);
+        } else {
+            await addSprints([editingSprint]);
         }
+
+        setEditingSprint(null);
+        setAdjustSubsequentDates(false);
     };
 
     const addSingleSprint = () => {
@@ -161,6 +212,7 @@ export default function SprintPlanner() {
             created_at: new Date().toISOString()
         };
 
+        setAdjustSubsequentDates(false);
         setEditingSprint(newSprint);
     };
 
@@ -371,8 +423,36 @@ export default function SprintPlanner() {
                                         ))}
                                     </div>
 
+                                    {(() => {
+                                        const sortedByDate = getOrderedSprintsForEditing(editingSprint);
+                                        const editedIndex = sortedByDate.findIndex(s => s.id === editingSprint.id);
+                                        const hasSubsequent = editedIndex !== -1 && editedIndex < sortedByDate.length - 1;
+                                        return hasSubsequent ? (
+                                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                                                <div className="flex items-start gap-2">
+                                                    <input
+                                                        id="adjustSubsequent"
+                                                        type="checkbox"
+                                                        className="mt-0.5 w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                                                        checked={adjustSubsequentDates}
+                                                        onChange={e => setAdjustSubsequentDates(e.target.checked)}
+                                                    />
+                                                    <label htmlFor="adjustSubsequent" className="text-sm cursor-pointer select-none">
+                                                        <span className="font-medium">Adjust subsequent sprint dates</span>
+                                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                                            Recalculates the next {sortedByDate.length - 1 - editedIndex} sprint{sortedByDate.length - 2 - editedIndex !== 0 ? 's' : ''} so each one starts right after the previous sprint ends.
+                                                        </p>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        ) : null;
+                                    })()}
+
                                     <div className="flex justify-end gap-2 pt-4">
-                                        <Button variant="outline" onClick={() => setEditingSprint(null)}>Cancel</Button>
+                                        <Button variant="outline" onClick={() => {
+                                            setEditingSprint(null);
+                                            setAdjustSubsequentDates(false);
+                                        }}>Cancel</Button>
                                         <Button onClick={saveEdit}>Save Changes</Button>
                                     </div>
                                 </CardContent>
@@ -517,7 +597,10 @@ export default function SprintPlanner() {
                                                                             </span>
                                                                         </td>
                                                                         <td className="p-4 align-top text-right">
-                                                                            <Button size="sm" variant="ghost" onClick={() => setEditingSprint(sprint)} title="Edit Sprint">
+                                                                            <Button size="sm" variant="ghost" onClick={() => {
+                                                                                setEditingSprint(sprint);
+                                                                                setAdjustSubsequentDates(false);
+                                                                            }} title="Edit Sprint">
                                                                                 <Pencil className="h-4 w-4" />
                                                                                 <span className="sr-only">Edit</span>
                                                                             </Button>
