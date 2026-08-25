@@ -14,12 +14,14 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url)
-    const sprintId = url.searchParams.get('sprint')
+    const sprintIdParam = url.searchParams.get('sprint')
+    const teamIdParam = url.searchParams.get('team')
     const shareMode = url.searchParams.get('share') === '1'
     const replayUrlParam = url.searchParams.get('replay')
+    const appBaseParam = url.searchParams.get('app')
 
-    if (!sprintId) {
-      return new Response('Missing sprint parameter', {
+    if (!sprintIdParam && !teamIdParam) {
+      return new Response('Missing sprint or team parameter', {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
       })
@@ -30,19 +32,50 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // Fetch sprint data
-    const { data: sprint, error: sprintError } = await supabase
-      .from('lrn_sprints')
-      .select('*')
-      .eq('id', sprintId)
-      .single()
+    let sprint: any | null = null
 
-    if (sprintError || !sprint) {
-      return new Response('Sprint not found', {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
-      })
+    if (sprintIdParam) {
+      const { data: sprintById, error: sprintError } = await supabase
+        .from('lrn_sprints')
+        .select('*')
+        .eq('id', sprintIdParam)
+        .single()
+
+      if (sprintError || !sprintById) {
+        return new Response('Sprint not found', {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+        })
+      }
+
+      sprint = sprintById
+    } else {
+      const { data: activeSprints, error: activeSprintError } = await supabase
+        .from('lrn_sprints')
+        .select('*')
+        .eq('team_id', teamIdParam)
+        .eq('status', 'active')
+        .order('start_date', { ascending: false })
+        .limit(1)
+
+      if (activeSprintError) {
+        return new Response('Could not resolve current sprint for team', {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+        })
+      }
+
+      sprint = activeSprints?.[0] ?? null
+
+      if (!sprint) {
+        return new Response('No active sprint found for team', {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+        })
+      }
     }
+
+    const sprintId = String(sprint.id)
 
     // Fetch team, roles, and members
     const [teamRes, rolesRes, membersRes] = await Promise.all([
@@ -63,6 +96,12 @@ serve(async (req) => {
     }
 
     if (shareMode) {
+      const replayUrl = resolveReplayUrl({
+        replayUrlParam,
+        appBaseParam,
+        sprintId,
+      })
+
       const shareHtml = generateShareCardHTML({
         team,
         roles,
@@ -70,7 +109,7 @@ serve(async (req) => {
         assignments: sprint.assignments,
         sprintId,
         requestUrl: url,
-        replayUrl: replayUrlParam,
+        replayUrl,
       })
 
       return new Response(shareHtml, {
@@ -179,6 +218,22 @@ function assignmentSummary(roles: any[], members: any[], assignments: Record<str
     const memberName = member?.name ? truncate(String(member.name), 16) : 'Unassigned'
     return `${roleName}: ${memberName}`
   }).join(' • ')
+}
+
+function normalizeAppBase(appBase: string): string {
+  return appBase.endsWith('/') ? appBase.slice(0, -1) : appBase
+}
+
+function resolveReplayUrl(input: {
+  replayUrlParam: string | null
+  appBaseParam: string | null
+  sprintId: string
+}): string | null {
+  if (input.replayUrlParam) return input.replayUrlParam
+  if (!input.appBaseParam) return null
+
+  const base = normalizeAppBase(input.appBaseParam)
+  return `${base}/presentation?replay=${encodeURIComponent(input.sprintId)}`
 }
 
 function generateShareCardHTML(input: {

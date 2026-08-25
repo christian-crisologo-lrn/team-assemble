@@ -5,7 +5,6 @@ import { useUIStore, type PresentationAnimation } from '../store/useUIStore';
 import { capitalizeFirst } from '../utils/string';
 import { Calendar, Play, Users, Shield, Sparkles, Info, Copy, Share2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { presentationGeneratePath } from '../utils/generatePresentation';
 import { useState } from 'react';
 
 const animationOptions: Array<{
@@ -31,22 +30,26 @@ const animationOptions: Array<{
 ];
 
 export default function Dashboard() {
-    const { currentTeam, members, roles, sprints, logout } = useSprintStore();
+    const { currentTeam, members, roles, sprints, currentSprintId, logout } = useSprintStore();
     const { presentationAnimation, setPresentationAnimation } = useUIStore();
     const navigate = useNavigate();
-    const [copiedGenerateLink, setCopiedGenerateLink] = useState(false);
+    const [copiedTeamId, setCopiedTeamId] = useState(false);
     const [copiedReplaySprintId, setCopiedReplaySprintId] = useState<string | null>(null);
 
-    const generatePath = currentTeam ? presentationGeneratePath(currentTeam.id) : '/presentation';
-    const generateUrl = `${window.location.origin}/team-assemble${generatePath}`;
+    const activeSprints = sprints.filter((sprint) => sprint.status === 'active');
+    const currentActiveSprint =
+        (currentSprintId ? activeSprints.find((sprint) => sprint.id === currentSprintId) : undefined)
+        ?? activeSprints.sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())[0];
 
-    const copyGenerateLink = async () => {
+    const copyTeamId = async () => {
+        const teamId = currentTeam?.id;
+        if (!teamId) return;
         try {
-            await navigator.clipboard.writeText(generateUrl);
-            setCopiedGenerateLink(true);
-            setTimeout(() => setCopiedGenerateLink(false), 2000);
+            await navigator.clipboard.writeText(teamId);
+            setCopiedTeamId(true);
+            setTimeout(() => setCopiedTeamId(false), 2000);
         } catch {
-            alert(generateUrl);
+            alert(teamId);
         }
     };
 
@@ -75,17 +78,6 @@ export default function Dashboard() {
                     </p>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
-                    {members.length > 0 && roles.length > 0 && (
-                        <>
-                            <Button size="sm" onClick={() => navigate(generatePath)}>
-                                Generate presentation
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={copyGenerateLink} className="gap-2">
-                                <Copy className="h-4 w-4" />
-                                {copiedGenerateLink ? 'Generate link copied' : 'Copy generate link'}
-                            </Button>
-                        </>
-                    )}
                     <Button variant="outline" size="sm" onClick={() => logout()}>
                         Switch Team
                     </Button>
@@ -115,8 +107,10 @@ export default function Dashboard() {
             </div>
 
             {/* Active Sprint Assignments */}
-            {sprints.filter(s => s.status === 'active').length > 0 ? (
-                sprints.filter(s => s.status === 'active').map(activeSprint => (
+            {currentActiveSprint ? (
+                (() => {
+                    const activeSprint = currentActiveSprint;
+                    return (
                     // ... (existing active sprint card)
                     <Card key={activeSprint.id} className="border-primary/20 bg-primary/5">
                         <CardHeader>
@@ -226,7 +220,8 @@ export default function Dashboard() {
                             </div>
                         </CardContent>
                     </Card>
-                ))
+                    );
+                })()
             ) : members.length === 0 || roles.length === 0 ? (
                 <Card className="border-dashed">
                     <CardHeader>
@@ -289,6 +284,13 @@ export default function Dashboard() {
                     </CardContent>
                 </Card>
             )}
+
+            <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={copyTeamId} className="gap-2" disabled={!currentTeam?.id}>
+                    <Copy className="h-4 w-4" />
+                    {copiedTeamId ? 'Team id copied' : 'Copy team-id'}
+                </Button>
+            </div>
         </div>
     );
 }

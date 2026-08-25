@@ -38,6 +38,24 @@ For a single-link share flow (thumbnail + redirect to presentation), use:
 https://YOUR_PROJECT_REF.supabase.co/functions/v1/og-image?share=1&sprint=SPRINT_ID&replay=ENCODED_PRESENTATION_URL
 ```
 
+For team-based automation (no sprint lookup in Slack), use:
+
+```
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/og-image?share=1&team=TEAM_ID&app=ENCODED_APP_BASE
+```
+
+Where `app` is your deployed app base path, for example:
+
+```
+https://your-domain.com/team-assemble
+```
+
+The function resolves the current active sprint for that team, generates the OG preview, and redirects to:
+
+```
+{app}/presentation?replay={resolved_sprint_id}
+```
+
 ## How It Works
 
 1. Accepts a `sprint` query parameter with the sprint ID
@@ -45,6 +63,7 @@ https://YOUR_PROJECT_REF.supabase.co/functions/v1/og-image?share=1&sprint=SPRINT
 3. Generates a crawler-friendly SVG image at 1200x630
 4. Returns `image/svg+xml` so social platforms can use it directly as a preview image
 5. Optional `share=1` mode returns HTML with OG tags (pointing at the SVG URL) and redirects humans to the replay URL
+6. Optional `team` mode resolves the latest active sprint for a team when `sprint` is not provided
 
 ## Alternative: Screenshot Service
 
