@@ -1,0 +1,9 @@
+{
+  "name": "team-assemble-unfurl",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.53.0",
+    "@vercel/og": "^0.8.5"
+  }
+}

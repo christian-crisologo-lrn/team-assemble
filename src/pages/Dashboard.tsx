@@ -54,8 +54,12 @@ export default function Dashboard() {
     };
 
     const copySlackShare = async (sprintId: string) => {
-        const replayUrl = `${window.location.origin}/team-assemble/presentation?replay=${sprintId}`;
-        const shareUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/og-image?share=1&sprint=${encodeURIComponent(sprintId)}&replay=${encodeURIComponent(replayUrl)}`;
+        const appBase = `${window.location.origin}/team-assemble`;
+        const replayUrl = `${appBase}/presentation?replay=${sprintId}`;
+        const unfurlBase = import.meta.env.VITE_UNFURL_BASE_URL?.replace(/\/$/, '');
+        const shareUrl = unfurlBase && currentTeam?.id
+            ? `${unfurlBase}/share?team=${encodeURIComponent(currentTeam.id)}&app=${encodeURIComponent(appBase)}&v=${encodeURIComponent(sprintId)}`
+            : replayUrl;
 
         try {
             await navigator.clipboard.writeText(shareUrl);

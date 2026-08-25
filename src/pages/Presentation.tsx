@@ -528,8 +528,12 @@ export default function Presentation() {
     const replayUrl = replayId
         ? `${window.location.origin}/team-assemble/presentation?replay=${replayId}`
         : null;
+    const appBase = `${window.location.origin}/team-assemble`;
+    const unfurlBase = import.meta.env.VITE_UNFURL_BASE_URL?.replace(/\/$/, '');
     const slackShareUrl = replayId
-        ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/og-image?share=1&sprint=${encodeURIComponent(replayId)}&replay=${encodeURIComponent(replayUrl ?? '')}`
+        ? (team?.id && unfurlBase
+            ? `${unfurlBase}/share?team=${encodeURIComponent(team.id)}&app=${encodeURIComponent(appBase)}&v=${encodeURIComponent(replayId)}`
+            : replayUrl)
         : null;
 
     const handleCopyReplayLink = async () => {

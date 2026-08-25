@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { addDays, format, parseISO } from 'date-fns';
-import { Save, Calendar, Pencil, Trash2, Users, Shield, Plus, GripVertical, ArrowUpDown, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Save, Calendar, Pencil, Trash2, Users, Shield, Plus, GripVertical, ArrowUpDown, ChevronUp, ChevronDown, AlertTriangle, Download, X } from 'lucide-react';
 import { rotateSequential, rotateRandom } from '../utils/rotation';
 import { addWeekdays } from '../utils/weekday';
 import type { Sprint } from '../types';
@@ -45,6 +45,10 @@ export default function SprintPlanner() {
 
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: SortKey, order: SortOrder }>({ key: 'start_date', order: 'asc' });
+    const [statusFilters, setStatusFilters] = useState<Set<Sprint['status']>>(new Set());
+    const [filterFromDate, setFilterFromDate] = useState('');
+    const [filterToDate, setFilterToDate] = useState('');
+    const [showFilters, setShowFilters] = useState(false);
 
     const sortedSprints = useMemo(() => {
         const sorted = [...sprints].sort((a, b) => {
@@ -68,6 +72,43 @@ export default function SprintPlanner() {
         return sorted;
     }, [sprints, sortConfig]);
 
+    const filteredSprints = useMemo(() => {
+        const fromDate = filterFromDate ? new Date(`${filterFromDate}T00:00:00`) : null;
+        const toDate = filterToDate ? new Date(`${filterToDate}T23:59:59.999`) : null;
+
+        return sortedSprints.filter((sprint) => {
+            if (statusFilters.size > 0 && !statusFilters.has(sprint.status)) {
+                return false;
+            }
+
+            const sprintStart = new Date(sprint.start_date);
+            const sprintEnd = new Date(sprint.end_date);
+
+            // Keep sprints that overlap the selected date window.
+            if (fromDate && sprintEnd < fromDate) {
+                return false;
+            }
+
+            if (toDate && sprintStart > toDate) {
+                return false;
+            }
+
+            return true;
+        });
+    }, [sortedSprints, statusFilters, filterFromDate, filterToDate]);
+
+    const hasActiveFilters = statusFilters.size > 0 || !!filterFromDate || !!filterToDate;
+
+    const toggleStatusFilter = (status: Sprint['status']) => {
+        const next = new Set(statusFilters);
+        if (next.has(status)) {
+            next.delete(status);
+        } else {
+            next.add(status);
+        }
+        setStatusFilters(next);
+    };
+
     const handleSort = (key: SortKey) => {
         setSortConfig(prev => ({
             key,
@@ -76,10 +117,17 @@ export default function SprintPlanner() {
     };
 
     const toggleSelectAll = () => {
-        if (selectedIds.size === sprints.length) {
-            setSelectedIds(new Set());
+        const visibleIds = filteredSprints.map(s => s.id);
+        const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+
+        if (allVisibleSelected) {
+            const next = new Set(selectedIds);
+            visibleIds.forEach((id) => next.delete(id));
+            setSelectedIds(next);
         } else {
-            setSelectedIds(new Set(sprints.map(s => s.id)));
+            const next = new Set(selectedIds);
+            visibleIds.forEach((id) => next.add(id));
+            setSelectedIds(next);
         }
     };
 
@@ -112,6 +160,7 @@ export default function SprintPlanner() {
     };
 
     const onDragEnd = async (result: DropResult) => {
+        if (hasActiveFilters) return;
         if (!result.destination) return;
         if (result.destination.index === result.source.index) return;
 
@@ -291,6 +340,46 @@ export default function SprintPlanner() {
         return sortConfig.order === 'asc' ? <ChevronUp className="ml-2 h-3 w-3" /> : <ChevronDown className="ml-2 h-3 w-3" />;
     };
 
+    const exportFilteredToCsv = () => {
+        if (filteredSprints.length === 0) return;
+
+        const escapeCsv = (value: string) => {
+            const normalized = value ?? '';
+            if (/[",\n]/.test(normalized)) {
+                return `"${normalized.replace(/"/g, '""')}"`;
+            }
+            return normalized;
+        };
+
+        const headers = ['Sprint Name', 'Start Date', 'End Date', 'Status', 'Assignments'];
+        const rows = filteredSprints.map((sprint) => {
+            const assignments = roles.map((role) => {
+                const memberId = sprint.assignments[role.id];
+                const member = members.find((m) => m.id === memberId);
+                return `${role.name}: ${member?.name || 'Unassigned'}`;
+            }).join(' | ');
+
+            return [
+                sprint.name,
+                format(parseISO(sprint.start_date), 'yyyy-MM-dd'),
+                format(parseISO(sprint.end_date), 'yyyy-MM-dd'),
+                sprint.status,
+                assignments,
+            ].map(escapeCsv).join(',');
+        });
+
+        const csv = [headers.join(','), ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `sprint-planner-${format(new Date(), 'yyyyMMdd-HHmmss')}.csv`;
+        anchor.click();
+
+        URL.revokeObjectURL(url);
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -300,6 +389,9 @@ export default function SprintPlanner() {
                 </div>
                 {step === 0 && (
                     <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => setShowFilters((prev) => !prev)}>
+                            <Calendar className="mr-2 h-4 w-4" /> {showFilters ? 'Hide Filters' : 'Show Filters'}
+                        </Button>
                         {selectedIds.size > 0 && (
                             <Button
                                 variant="destructive"
@@ -350,6 +442,60 @@ export default function SprintPlanner() {
 
             {step === 0 && (
                 <div className="space-y-4">
+                    {showFilters && (
+                        <Card>
+                            <CardContent className="p-4">
+                                <div className="grid gap-3 md:grid-cols-4 items-end">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-muted-foreground">From</label>
+                                        <Input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-muted-foreground">To</label>
+                                        <Input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-muted-foreground">Status</label>
+                                        <div className="flex h-10 w-full items-center gap-3 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                                            {(['planning', 'active', 'completed'] as Sprint['status'][]).map((status) => (
+                                                <label key={status} className="inline-flex items-center gap-1 text-xs cursor-pointer select-none">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                                                        checked={statusFilters.has(status)}
+                                                        onChange={() => toggleStatusFilter(status)}
+                                                    />
+                                                    <span className="capitalize">{status}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-end gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            onClick={() => {
+                                                setFilterFromDate('');
+                                                setFilterToDate('');
+                                                setStatusFilters(new Set());
+                                            }}
+                                            disabled={!hasActiveFilters}
+                                        >
+                                            <X className="mr-2 h-4 w-4" /> Clear
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div className="mt-3 flex justify-end">
+                                    <Button variant="outline" onClick={exportFilteredToCsv} disabled={filteredSprints.length === 0}>
+                                        <Download className="mr-2 h-4 w-4" /> Export CSV
+                                    </Button>
+                                </div>
+                                <p className="mt-3 text-xs text-muted-foreground">
+                                    Showing {filteredSprints.length} of {sprints.length} sprint records.
+                                </p>
+                            </CardContent>
+                        </Card>
+                    )}
+
                     {editingSprint && (
                         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                             <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl bg-white text-black border-2">
@@ -513,7 +659,7 @@ export default function SprintPlanner() {
                                                     <input
                                                         type="checkbox"
                                                         className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                                        checked={selectedIds.size === sprints.length && sprints.length > 0}
+                                                                checked={filteredSprints.length > 0 && filteredSprints.every((s) => selectedIds.has(s.id))}
                                                         onChange={toggleSelectAll}
                                                     />
                                                 </th>
@@ -536,7 +682,7 @@ export default function SprintPlanner() {
                                                         ref={provided.innerRef}
                                                         className="divide-y"
                                                     >
-                                                        {sortedSprints.map((sprint, idx) => (
+                                                        {filteredSprints.map((sprint, idx) => (
                                                             <Draggable key={sprint.id} draggableId={sprint.id} index={idx}>
                                                                 {(provided, snapshot) => (
                                                                     <tr
