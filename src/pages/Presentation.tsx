@@ -7,6 +7,13 @@ import confetti from 'canvas-confetti';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { rotateSequential, rotateRandom } from '../utils/rotation';
+import {
+    buildGeneratedSprint,
+    findSprintForDate,
+    isGenerateRequested,
+    parseGenerateDate,
+    parseGenerateStrategy
+} from '../utils/generatePresentation';
 import { DynamicIcon } from '../components/ui/IconPicker';
 import { supabase } from '../lib/supabase';
 import { Loader2, Rocket } from 'lucide-react';
@@ -15,6 +22,8 @@ import { ERROR_MESSAGES, getFriendlyErrorMessage } from '../utils/errors';
 import { capitalizeFirst } from '../utils/string';
 import html2canvas from 'html2canvas';
 import { Share2, Download, Check, Copy } from 'lucide-react';
+
+let generateInFlight: string | null = null;
 
 async function waitForImagesToLoad(container: HTMLElement): Promise<void> {
     const images = Array.from(container.querySelectorAll('img')) as HTMLImageElement[];
@@ -38,11 +47,17 @@ async function waitForImagesToLoad(container: HTMLElement): Promise<void> {
 }
 
 export default function Presentation() {
-    const { currentTeam: storeTeam, members: storeMembers, roles: storeRoles, sprints: storeSprints, startSprint } = useSprintStore();
+    const { currentTeam: storeTeam, members: storeMembers, roles: storeRoles, sprints: storeSprints, startSprint, isLoading: isStoreLoading } = useSprintStore();
     const { setSidebarCollapsed, presentationAnimation } = useUIStore();
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const replayId = searchParams.get('replay');
+    const generateRequested = isGenerateRequested(searchParams.get('generate'));
+    const generateTeamParam = searchParams.get('team');
+    const generateStrategyParam = searchParams.get('strategy');
+    const generateDateParam = searchParams.get('date');
+    const generateStrategy = parseGenerateStrategy(generateStrategyParam);
+    const generateDate = parseGenerateDate(generateDateParam);
 
     // Local state for public viewing
     const [publicData, setPublicData] = useState<{
@@ -51,7 +66,7 @@ export default function Presentation() {
         roles: Role[],
         sprint: Sprint | null
     } | null>(null);
-    const [isPublicLoading, setIsPublicLoading] = useState(!!replayId && !storeTeam);
+    const [isPublicLoading, setIsPublicLoading] = useState((!!replayId && !storeTeam) || generateRequested);
     const [publicError, setPublicError] = useState<string | null>(null);
 
     // Sidebar collapse effect
@@ -84,7 +99,7 @@ export default function Presentation() {
 
                 // 2. Fetch Team, Roles, and Members in parallel
                 const [teamRes, rolesRes, membersRes] = await Promise.all([
-                    supabase.from('lrn_teams').select('*').eq('id', sprint.team_id).single(),
+                    supabase.from('lrn_teams').select('id, name, created_at').eq('id', sprint.team_id).single(),
                     supabase.from('lrn_roles').select('*').eq('team_id', sprint.team_id).order('created_at', { ascending: true }),
                     supabase.from('lrn_team_members').select('member_id, lrn_members(*)').eq('team_id', sprint.team_id)
                 ]);
@@ -114,6 +129,101 @@ export default function Presentation() {
         fetchPublicData();
     }, [replayId, storeTeam]);
 
+    useEffect(() => {
+        const runGenerate = async () => {
+            if (replayId || !generateRequested) return;
+            if (storeTeam && isStoreLoading) return;
+
+            const teamId = storeTeam?.id || generateTeamParam;
+            if (!teamId) {
+                setPublicError(ERROR_MESSAGES.generateNeedsTeam);
+                setIsPublicLoading(false);
+                return;
+            }
+
+            const flightKey = `${teamId}:${generateDate?.toISOString() ?? 'new'}:${generateStrategy}`;
+            if (generateInFlight === flightKey) return;
+            generateInFlight = flightKey;
+
+            setIsPublicLoading(true);
+            setPublicError(null);
+
+            try {
+                let members = storeTeam ? storeMembers : [];
+                let roles = storeTeam ? storeRoles : [];
+                let sprints = storeTeam ? storeSprints : [];
+
+                if (!storeTeam) {
+                    const [teamRes, rolesRes, membersRes, sprintsRes] = await Promise.all([
+                        supabase.from('lrn_teams').select('id, name, created_at').eq('id', teamId).single(),
+                        supabase.from('lrn_roles').select('*').eq('team_id', teamId).order('created_at', { ascending: true }),
+                        supabase.from('lrn_team_members').select('member_id, lrn_members(*)').eq('team_id', teamId),
+                        supabase.from('lrn_sprints').select('*').eq('team_id', teamId).order('start_date', { ascending: true })
+                    ]);
+
+                    if (teamRes.error || !teamRes.data) throw new Error('Team not found');
+
+                    members = (membersRes.data?.map((tm: Record<string, unknown>) => tm.lrn_members).filter(Boolean) || []) as Member[];
+                    roles = rolesRes.data || [];
+                    sprints = sprintsRes.data || [];
+                }
+
+                if (members.length === 0 || roles.length === 0) {
+                    throw new Error(ERROR_MESSAGES.generateNeedsSetup);
+                }
+
+                if (generateDate) {
+                    const existing = findSprintForDate(sprints, generateDate);
+                    if (existing) {
+                        setSearchParams({ replay: existing.id }, { replace: true });
+                        generateInFlight = null;
+                        return;
+                    }
+                }
+
+                const sprint = buildGeneratedSprint(members, roles, sprints, generateStrategy, generateDate);
+                if (storeTeam) {
+                    await startSprint(sprint);
+                } else {
+                    const { error } = await supabase.from('lrn_sprints').insert([{ ...sprint, team_id: teamId }]);
+                    if (error) throw error;
+                }
+
+                setSearchParams({ replay: sprint.id }, { replace: true });
+                generateInFlight = null;
+            } catch (err: unknown) {
+                generateInFlight = null;
+                const error = err instanceof Error ? err : new Error(String(err));
+                console.error('Generate presentation error:', error);
+                setPublicError(
+                    error.message === ERROR_MESSAGES.generateNeedsSetup
+                        ? ERROR_MESSAGES.generateNeedsSetup
+                        : getFriendlyErrorMessage(error, {
+                            action: 'generate this presentation',
+                            fallback: ERROR_MESSAGES.generatePresentationFailed
+                        })
+                );
+            } finally {
+                setIsPublicLoading(false);
+            }
+        };
+
+        runGenerate();
+    }, [
+        replayId,
+        generateRequested,
+        generateTeamParam,
+        generateStrategyParam,
+        generateDateParam,
+        storeTeam,
+        storeMembers,
+        storeRoles,
+        storeSprints,
+        isStoreLoading,
+        startSprint,
+        setSearchParams
+    ]);
+
     const hasInitialized = useRef(false);
     const [step, setStep] = useState<'loading' | 'revealing' | 'manual_setup' | 'finished'>('loading');
     const [currentRoleIndex, setCurrentRoleIndex] = useState(0);
@@ -124,18 +234,14 @@ export default function Presentation() {
     const [isCapturing, setIsCapturing] = useState(false);
     const [isSnapshotMode, setIsSnapshotMode] = useState(false);
     const [copySuccess, setCopySuccess] = useState(false);
+    const [copiedReplayLink, setCopiedReplayLink] = useState(false);
+    const [copiedSlackShare, setCopiedSlackShare] = useState(false);
     const [avatarBlobs, setAvatarBlobs] = useState<Record<string, string>>({});
     // Ref mirror so handleCapture's onclone always reads the latest blobs (no stale closure)
     const avatarBlobsRef = useRef<Record<string, string>>({});
     const resultsRef = useRef<HTMLDivElement>(null);
     const isRocketAnimation = presentationAnimation === 'rocketship';
     const isJumpingAvatarAnimation = presentationAnimation === 'jumping-avatars';
-
-    // Derived URLs for sharing
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseProjectId = supabaseUrl?.split('.')[0].split('//')[1];
-    const edgeFunctionUrl = supabaseProjectId ? `https://${supabaseProjectId}.supabase.co/functions/v1/share-preview` : '';
-    const shareProxyUrl = replayId ? `${edgeFunctionUrl}?replay=${replayId}` : '';
 
     // Pre-load avatars as base64 data URLs so html2canvas can render them (blob: URLs are blocked)
     useEffect(() => {
@@ -271,6 +377,7 @@ export default function Presentation() {
     }, [members, roles, sprints, replayId]);
 
     useEffect(() => {
+        if (generateRequested && !replayId) return;
         if (!hasInitialized.current && sprints.length > 0) {
             hasInitialized.current = true;
             if (replayId) {
@@ -279,7 +386,7 @@ export default function Presentation() {
                 handleStart('sequential');
             }
         }
-    }, [replayId, sprints, handleStart]);
+    }, [replayId, generateRequested, sprints, handleStart]);
 
     const confirmManual = () => {
         setStep('revealing');
@@ -292,13 +399,45 @@ export default function Presentation() {
         setUploadingImage(true);
         setIsSnapshotMode(true);
         try {
+            console.log('Starting capture with avatarBlobsRef:', Object.keys(avatarBlobsRef.current).length, 'entries');
+            
             // Double rAF: first flush React's state update to the DOM, second ensures paint.
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))));
             // Give framer-motion enough time to animate to the explicit resting values (duration: 0).
             await new Promise(resolve => setTimeout(resolve, 300));
             await waitForImagesToLoad(resultsRef.current);
 
-            const canvas = await html2canvas(resultsRef.current, {
+            // Create a temporary clone with data URLs baked in
+            const tempContainer = document.createElement('div');
+            tempContainer.style.position = 'fixed';
+            tempContainer.style.left = '-9999px';
+            tempContainer.style.top = '-9999px';
+            
+            const clonedContent = resultsRef.current.cloneNode(true) as HTMLElement;
+            
+            // Replace all avatar images with data URLs in the clone
+            const clonedImgs = Array.from(clonedContent.querySelectorAll('img[data-member-id]')) as HTMLImageElement[];
+            console.log('Found', clonedImgs.length, 'images in cloned content');
+            
+            clonedImgs.forEach(img => {
+                const memberId = img.getAttribute('data-member-id');
+                const dataUrl = memberId ? avatarBlobsRef.current[memberId] : null;
+                if (dataUrl) {
+                    console.log('Setting data URL for member', memberId);
+                    img.src = dataUrl;
+                    img.style.display = 'block';
+                } else {
+                    console.log('No data URL for member', memberId);
+                }
+            });
+            
+            tempContainer.appendChild(clonedContent);
+            document.body.appendChild(tempContainer);
+            
+            // Wait for images in the cloned element to load
+            await waitForImagesToLoad(clonedContent);
+            
+            const canvas = await html2canvas(clonedContent, {
                 useCORS: true,
                 allowTaint: false,
                 scale: 2,
@@ -306,43 +445,17 @@ export default function Presentation() {
                 logging: false,
                 imageTimeout: 15000,
                 onclone: (_doc, clonedEl) => {
-                    // 1. Strip every inline transform/opacity framer-motion injected so nothing
-                    //    is off-screen, invisible, or mid-animation in the cloned DOM.
+                    // Strip any remaining framer-motion transforms
                     const allEls = Array.from(clonedEl.querySelectorAll('*')) as HTMLElement[];
                     allEls.forEach(el => {
                         if (el.style.transform) el.style.transform = 'none';
                         if (el.style.opacity !== '' && parseFloat(el.style.opacity) < 1) el.style.opacity = '1';
-                        if (el.style.visibility && el.style.visibility !== 'visible') el.style.visibility = 'visible';
-                    });
-
-                    // 2. Replace every avatar <img> with a background-image <div>.
-                    //    html2canvas reliably renders CSS background-image with data URLs,
-                    //    but frequently drops <img> elements inside overflow:hidden + border-radius.
-                    const imgs = Array.from(clonedEl.querySelectorAll('img[data-member-id]')) as HTMLImageElement[];
-                    imgs.forEach(img => {
-                        const memberId = img.getAttribute('data-member-id');
-                        const dataUrl = memberId ? avatarBlobsRef.current[memberId] : null;
-                        if (!dataUrl || !img.parentElement) return;
-
-                        const container = img.parentElement;
-                        // Open the clipping so the background image isn't cut off
-                        container.style.overflow = 'visible';
-                        container.style.borderRadius = '50%';
-
-                        // Swap the <img> for a div with background-image
-                        const replacement = document.createElement('div');
-                        replacement.style.cssText = [
-                            'width:100%',
-                            'height:100%',
-                            `background-image:url('${dataUrl}')`,
-                            'background-size:cover',
-                            'background-position:center',
-                            'border-radius:50%',
-                        ].join(';');
-                        container.replaceChild(replacement, img);
                     });
                 },
             });
+            
+            // Clean up temporary clone
+            document.body.removeChild(tempContainer);
 
             const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
             if (!blob) throw new Error('Failed to create blob');
@@ -412,39 +525,41 @@ export default function Presentation() {
         }
     };
 
-    const handleShare = async () => {
-        const blob = screenshotBlob || await handleCapture();
-        if (!blob) return;
+    const replayUrl = replayId
+        ? `${window.location.origin}/team-assemble/presentation?replay=${replayId}`
+        : null;
+    const slackShareUrl = replayId
+        ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/og-image?share=1&sprint=${encodeURIComponent(replayId)}&replay=${encodeURIComponent(replayUrl ?? '')}`
+        : null;
 
-        const shareUrl = window.location.href; // Use current URL with replay ID if present
-
-        // Use Web Share API if available
-        if (navigator.share) {
-            try {
-                const file = new File([blob], 'team-assemble.png', { type: 'image/png' });
-
-                await navigator.share({
-                    title: `Team ${capitalizeFirst(team?.name)} - Sprint Presentation`,
-                    text: `Check out our new team rotation for ${team?.name}!`,
-                    url: shareProxyUrl || shareUrl,
-                    files: [file],
-                });
-            } catch (error) {
-                console.error('Error sharing:', error);
-            }
+    const handleCopyReplayLink = async () => {
+        if (!replayUrl) return;
+        try {
+            await navigator.clipboard.writeText(replayUrl);
+            setCopiedReplayLink(true);
+            setTimeout(() => setCopiedReplayLink(false), 2000);
+        } catch {
+            alert(replayUrl);
         }
     };
 
-    // Generate meta tags for social sharing
-    const baseUrl = window.location.origin + window.location.pathname.replace('/presentation', '');
-    const currentUrl = window.location.href;
-    const pageTitle = team ? `Team ${capitalizeFirst(team.name)} - Sprint Presentation` : 'Team Assemble - Sprint Presentation';
-    const pageDescription = team && roles.length > 0
-        ? `Check out the sprint roles for Team ${capitalizeFirst(team.name)}: ${roles.slice(0, 3).map(r => r.name).join(', ')}${roles.length > 3 ? '...' : ''}`
-        : 'Sprint role assignments and rotations for agile teams';
+    const handleCopySlackShare = async () => {
+        if (!slackShareUrl) return;
+        try {
+            await navigator.clipboard.writeText(slackShareUrl);
+            setCopiedSlackShare(true);
+            setTimeout(() => setCopiedSlackShare(false), 2000);
+        } catch {
+            alert(slackShareUrl);
+        }
+    };
 
-    // Use screenshot URL if available, otherwise fallback to default
-    const ogImageUrl = screenshotUrl || `${baseUrl}/social-preview.png`;
+
+    const pageTitle = team ? `Team ${capitalizeFirst(team.name)} - Sprint Presentation` : 'Team Assemble - Sprint Presentation';
+
+    useEffect(() => {
+        document.title = pageTitle;
+    }, [pageTitle]);
 
     if (isPublicLoading || step === 'loading') {
         return (
@@ -523,23 +638,6 @@ export default function Presentation() {
 
     return (
         <div className="flex flex-col items-center justify-center min-h-[100vh] space-y-6 p-4">
-            <title>{pageTitle}</title>
-            <meta name="description" content={pageDescription} />
-
-            {/* Open Graph / Facebook */}
-            <meta property="og:type" content="website" />
-            <meta property="og:url" content={currentUrl} />
-            <meta property="og:title" content={pageTitle} />
-            <meta property="og:description" content={pageDescription} />
-            <meta property="og:image" content={ogImageUrl} />
-
-            {/* Twitter */}
-            <meta property="twitter:card" content="summary_large_image" />
-            <meta property="twitter:url" content={currentUrl} />
-            <meta property="twitter:title" content={pageTitle} />
-            <meta property="twitter:description" content={pageDescription} />
-            <meta property="twitter:image" content={ogImageUrl} />
-
             {step === 'finished' ? (
                 <div className="text-center space-y-6 animate-in zoom-in duration-1000 w-full flex flex-col items-center justify-center">
                     <div ref={resultsRef} className="p-8 pb-12 w-full flex flex-col items-center justify-center bg-background rounded-3xl">
@@ -621,20 +719,29 @@ export default function Presentation() {
                                         {copySuccess ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                                         {copySuccess ? 'Copied!' : 'Copy Image'}
                                     </Button>
-                                    {typeof navigator.share === 'function' && (
-                                        <Button onClick={handleShare} size="lg" className="gap-2 bg-blue-600 hover:bg-blue-700" disabled={uploadingImage}>
-                                            <Share2 className="h-4 w-4" />
-                                            Share Results
-                                        </Button>
-                                    )}
                                 </>
                             )}
                         </div>
 
                         {/* Share URL Button - Always visible when there's a replayId */}
                         {replayId && (
-                            <div className="flex flex-col items-center gap-2">
-                                <p className="text-sm text-muted-foreground">{uploadingImage ? 'Syncing preview for social media...' : ''}</p>
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="flex flex-wrap justify-center gap-3">
+                                    <Button onClick={handleCopyReplayLink} size="sm" variant="outline" className="gap-2" disabled={uploadingImage}>
+                                        <Copy className="h-4 w-4" />
+                                        {copiedReplayLink ? 'Replay link copied' : 'Copy replay link'}
+                                    </Button>
+                                    <Button onClick={handleCopySlackShare} size="sm" variant="outline" className="gap-2" disabled={uploadingImage}>
+                                        <Share2 className="h-4 w-4" />
+                                        {copiedSlackShare ? 'Slack share copied' : 'Copy Slack share text'}
+                                    </Button>
+                                </div>
+                                <p className="text-sm text-muted-foreground text-center max-w-2xl">
+                                    The Slack share link includes a role-preview thumbnail and redirects viewers to this presentation.
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    {uploadingImage ? 'Syncing preview for social media...' : ''}
+                                </p>
                             </div>
                         )}
 

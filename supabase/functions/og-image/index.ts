@@ -15,6 +15,8 @@ serve(async (req) => {
   try {
     const url = new URL(req.url)
     const sprintId = url.searchParams.get('sprint')
+    const shareMode = url.searchParams.get('share') === '1'
+    const replayUrlParam = url.searchParams.get('replay')
 
     if (!sprintId) {
       return new Response('Missing sprint parameter', {
@@ -60,95 +62,168 @@ serve(async (req) => {
       })
     }
 
-    // Generate HTML for OG image
-    const html = generateOGImageHTML(team, roles, members, sprint.assignments)
+    if (shareMode) {
+      const shareHtml = generateShareCardHTML({
+        team,
+        roles,
+        members,
+        assignments: sprint.assignments,
+        sprintId,
+        requestUrl: url,
+        replayUrl: replayUrlParam,
+      })
 
-    return new Response(html, {
+      return new Response(shareHtml, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=120',
+        },
+      })
+    }
+
+    const svg = generateOGImageSVG(team, roles, members, sprint.assignments)
+
+    return new Response(svg, {
       headers: {
         ...corsHeaders,
-        'Content-Type': 'text/html',
+        'Content-Type': 'image/svg+xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=300',
       },
     })
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
 })
 
-function generateOGImageHTML(team: any, roles: any[], members: any[], assignments: Record<string, string>) {
-  const roleCards = roles.slice(0, 8).map(role => {
-    const member = members.find(m => m.id === assignments[role.id])
-    
+function escapeXml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;')
+}
+
+function truncate(value: string, max = 18): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+function generateOGImageSVG(team: any, roles: any[], members: any[], assignments: Record<string, string>) {
+  const width = 1200
+  const height = 630
+  const maxCards = 8
+  const cards = roles.slice(0, maxCards)
+
+  const columns = 4
+  const cardWidth = 250
+  const cardHeight = 170
+  const gapX = 20
+  const gapY = 18
+  const startX = 65
+  const startY = 170
+
+  const cardNodes = cards.map((role, index) => {
+    const row = Math.floor(index / columns)
+    const col = index % columns
+    const x = startX + col * (cardWidth + gapX)
+    const y = startY + row * (cardHeight + gapY)
+    const member = members.find((m: any) => m.id === assignments[role.id])
+    const memberName = member?.name ? truncate(String(member.name), 20) : 'Unassigned'
+    const roleName = truncate(String(role.name || 'Role'), 18)
+    const initial = member?.name ? String(member.name).charAt(0).toUpperCase() : '?'
+
     return `
-      <div style="background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); border-radius: 12px; padding: 16px; border: 1px solid rgba(255,255,255,0.2); display: flex; flex-direction: column; align-items: center; gap: 12px;">
-        <div style="background: rgba(168, 85, 247, 0.2); padding: 12px; border-radius: 50%; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;">
-          <div style="color: #c4b5fd; font-size: 28px;">⚡</div>
-        </div>
-        <div style="color: #ddd6fe; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; text-align: center;">
-          ${role.name}
-        </div>
-        ${member ? `
-          <div style="width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: #334155; border: 2px solid #a855f7;">
-            ${member.avatar_url ? 
-              `<img src="${member.avatar_url}" style="width: 100%; height: 100%; object-fit: cover;" />` :
-              `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold;">${member.name.charAt(0).toUpperCase()}</div>`
-            }
-          </div>
-          <div style="color: white; font-size: 14px; font-weight: 600; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis;">
-            ${member.name}
-          </div>
-        ` : `
-          <div style="color: #94a3b8; font-size: 14px; font-style: italic;">Unassigned</div>
-        `}
-      </div>
+      <g>
+        <rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="16" fill="rgba(15,23,42,0.55)" stroke="rgba(196,181,253,0.4)" />
+        <circle cx="${x + 44}" cy="${y + 48}" r="22" fill="rgba(168,85,247,0.25)" stroke="rgba(216,180,254,0.7)" />
+        <text x="${x + 44}" y="${y + 55}" font-size="20" text-anchor="middle" fill="#f5f3ff" font-weight="700">${escapeXml(initial)}</text>
+        <text x="${x + 78}" y="${y + 42}" font-size="14" fill="#e9d5ff" font-weight="700">${escapeXml(roleName)}</text>
+        <text x="${x + 78}" y="${y + 68}" font-size="18" fill="#ffffff" font-weight="600">${escapeXml(memberName)}</text>
+      </g>
     `
   }).join('')
 
   return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=1200, height=630">
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-          }
-        </style>
-      </head>
-      <body>
-        <div style="width: 1200px; height: 630px; background: linear-gradient(135deg, #0f172a 0%, #581c87 50%, #0f172a 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; position: relative; overflow: hidden;">
-          <!-- Background decoration -->
-          <div style="position: absolute; inset: 0; opacity: 0.1;">
-            <div style="position: absolute; top: 40px; left: 40px; width: 160px; height: 160px; background: #a855f7; border-radius: 50%; filter: blur(60px);"></div>
-            <div style="position: absolute; bottom: 40px; right: 40px; width: 240px; height: 240px; background: #ec4899; border-radius: 50%; filter: blur(60px);"></div>
-          </div>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Sprint role assignments">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="55%" stop-color="#4c1d95"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+  </defs>
 
-          <!-- Content -->
-          <div style="position: relative; z-index: 10; width: 100%; max-width: 1100px;">
-            <!-- Header -->
-            <div style="text-align: center; margin-bottom: 32px;">
-              <h1 style="font-size: 48px; font-weight: 800; color: white; margin-bottom: 8px;">
-                Team ${team.name}
-              </h1>
-              <p style="color: #ddd6fe; font-size: 24px;">Sprint Roles</p>
-            </div>
+  <rect width="100%" height="100%" fill="url(#bg)" />
+  <circle cx="110" cy="85" r="140" fill="rgba(168,85,247,0.18)" />
+  <circle cx="1090" cy="560" r="170" fill="rgba(236,72,153,0.14)" />
 
-            <!-- Roles Grid -->
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;">
-              ${roleCards}
-            </div>
+  <text x="60" y="82" font-size="48" fill="#ffffff" font-weight="800">Team ${escapeXml(truncate(String(team.name || 'Unknown Team'), 26))}</text>
+  <text x="60" y="118" font-size="24" fill="#ddd6fe">Current Sprint Roles</text>
 
-            <!-- Footer -->
-            <div style="text-align: center; margin-top: 32px;">
-              <div style="color: #ddd6fe; font-size: 18px;">team-assemble</div>
-            </div>
-          </div>
-        </div>
-      </body>
-    </html>
-  `
+  ${cardNodes}
+
+  <text x="60" y="595" font-size="16" fill="#ddd6fe">team-assemble</text>
+</svg>
+  `.trim()
+}
+
+function assignmentSummary(roles: any[], members: any[], assignments: Record<string, string>): string {
+  return roles.slice(0, 4).map((role) => {
+    const member = members.find((m: any) => m.id === assignments[role.id])
+    const roleName = truncate(String(role.name || 'Role'), 16)
+    const memberName = member?.name ? truncate(String(member.name), 16) : 'Unassigned'
+    return `${roleName}: ${memberName}`
+  }).join(' • ')
+}
+
+function generateShareCardHTML(input: {
+  team: any
+  roles: any[]
+  members: any[]
+  assignments: Record<string, string>
+  sprintId: string
+  requestUrl: URL
+  replayUrl: string | null
+}): string {
+  const imageUrl = new URL(input.requestUrl.toString())
+  imageUrl.search = ''
+  imageUrl.searchParams.set('sprint', input.sprintId)
+
+  const teamName = truncate(String(input.team?.name || 'Team Assemble'), 28)
+  const title = `Team ${teamName} - Sprint Roles`
+  const summary = assignmentSummary(input.roles, input.members, input.assignments)
+  const description = summary || 'Current sprint role assignments'
+  const replayUrl = input.replayUrl ? escapeXml(input.replayUrl) : ''
+  const redirectTag = replayUrl ? `<meta http-equiv="refresh" content="0;url=${replayUrl}">` : ''
+  const redirectScript = replayUrl
+    ? `<script>window.location.replace(${JSON.stringify(input.replayUrl)});</script>`
+    : ''
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeXml(title)}</title>
+    <meta name="description" content="${escapeXml(description)}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${escapeXml(title)}" />
+    <meta property="og:description" content="${escapeXml(description)}" />
+    <meta property="og:image" content="${escapeXml(imageUrl.toString())}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeXml(title)}" />
+    <meta name="twitter:description" content="${escapeXml(description)}" />
+    <meta name="twitter:image" content="${escapeXml(imageUrl.toString())}" />
+    ${redirectTag}
+  </head>
+  <body>
+    <p>Opening presentation...</p>
+    ${redirectScript}
+  </body>
+</html>`
 }

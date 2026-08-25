@@ -5,7 +5,10 @@ export const ERROR_MESSAGES = {
     notFound: 'We could not find what you were looking for.',
     loginFailed: 'We could not log you in right now. Please try again. Please check your team name and password.',
     createTeamFailed: 'We could not create your team right now. Please try again.',
-    presentationLoadFailed: 'We could not load this presentation right now. Please try again.'
+    presentationLoadFailed: 'We could not load this presentation right now. Please try again.',
+    generateNeedsTeam: 'This generate link needs a team id, or you can log in first.',
+    generateNeedsSetup: 'This team needs at least one member and one role before a presentation can be generated.',
+    generatePresentationFailed: 'We could not generate this presentation right now. Please try again.'
 } as const;
 
 export const ERROR_MESSAGE_TEMPLATES = {

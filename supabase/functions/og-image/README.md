@@ -30,12 +30,21 @@ https://YOUR_PROJECT_REF.supabase.co/functions/v1/og-image?sprint=SPRINT_ID
 
 This URL should be used in the `og:image` meta tag for sprint presentations.
 
+It can also be pasted directly into Slack (alongside the replay URL) so Slack can unfurl a thumbnail for the current role assignments.
+
+For a single-link share flow (thumbnail + redirect to presentation), use:
+
+```
+https://YOUR_PROJECT_REF.supabase.co/functions/v1/og-image?share=1&sprint=SPRINT_ID&replay=ENCODED_PRESENTATION_URL
+```
+
 ## How It Works
 
 1. Accepts a `sprint` query parameter with the sprint ID
 2. Fetches the sprint data, team, roles, and members from Supabase
-3. Generates an HTML page styled to look good as an OG image (1200x630px)
-4. Returns the HTML which can be screenshot by social media crawlers
+3. Generates a crawler-friendly SVG image at 1200x630
+4. Returns `image/svg+xml` so social platforms can use it directly as a preview image
+5. Optional `share=1` mode returns HTML with OG tags (pointing at the SVG URL) and redirects humans to the replay URL
 
 ## Alternative: Screenshot Service
 

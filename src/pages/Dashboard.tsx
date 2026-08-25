@@ -3,8 +3,10 @@ import { Button } from '../components/ui/button';
 import { useSprintStore } from '../store/useSprintStore';
 import { useUIStore, type PresentationAnimation } from '../store/useUIStore';
 import { capitalizeFirst } from '../utils/string';
-import { Calendar, Play, Users, Shield, Sparkles, Info } from 'lucide-react';
+import { Calendar, Play, Users, Shield, Sparkles, Info, Copy, Share2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { presentationGeneratePath } from '../utils/generatePresentation';
+import { useState } from 'react';
 
 const animationOptions: Array<{
     value: PresentationAnimation;
@@ -32,6 +34,34 @@ export default function Dashboard() {
     const { currentTeam, members, roles, sprints, logout } = useSprintStore();
     const { presentationAnimation, setPresentationAnimation } = useUIStore();
     const navigate = useNavigate();
+    const [copiedGenerateLink, setCopiedGenerateLink] = useState(false);
+    const [copiedReplaySprintId, setCopiedReplaySprintId] = useState<string | null>(null);
+
+    const generatePath = currentTeam ? presentationGeneratePath(currentTeam.id) : '/presentation';
+    const generateUrl = `${window.location.origin}/team-assemble${generatePath}`;
+
+    const copyGenerateLink = async () => {
+        try {
+            await navigator.clipboard.writeText(generateUrl);
+            setCopiedGenerateLink(true);
+            setTimeout(() => setCopiedGenerateLink(false), 2000);
+        } catch {
+            alert(generateUrl);
+        }
+    };
+
+    const copySlackShare = async (sprintId: string) => {
+        const replayUrl = `${window.location.origin}/team-assemble/presentation?replay=${sprintId}`;
+        const shareUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/og-image?share=1&sprint=${encodeURIComponent(sprintId)}&replay=${encodeURIComponent(replayUrl)}`;
+
+        try {
+            await navigator.clipboard.writeText(shareUrl);
+            setCopiedReplaySprintId(sprintId);
+            setTimeout(() => setCopiedReplaySprintId(null), 2000);
+        } catch {
+            alert(shareUrl);
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -44,7 +74,18 @@ export default function Dashboard() {
                         Dashboard & Sprint Overview
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                    {members.length > 0 && roles.length > 0 && (
+                        <>
+                            <Button size="sm" onClick={() => navigate(generatePath)}>
+                                Generate presentation
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={copyGenerateLink} className="gap-2">
+                                <Copy className="h-4 w-4" />
+                                {copiedGenerateLink ? 'Generate link copied' : 'Copy generate link'}
+                            </Button>
+                        </>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => logout()}>
                         Switch Team
                     </Button>
@@ -95,14 +136,14 @@ export default function Dashboard() {
                                             <Button
                                                 size="sm"
                                                 variant="ghost"
-                                                onClick={() => {
-                                                    const url = `${window.location.origin}/team-assemble/presentation?replay=${activeSprint.id}`;
-                                                    navigator.clipboard.writeText(url);
-                                                    alert('Replay link copied to clipboard!');
-                                                }}
-                                                title="Share Presentation Link"
+                                                onClick={() => copySlackShare(activeSprint.id)}
+                                                title="Copy Slack Share Text"
                                             >
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-muted-foreground"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" /></svg>
+                                                {copiedReplaySprintId === activeSprint.id ? (
+                                                    <Copy className="h-4 w-4 text-green-600" />
+                                                ) : (
+                                                    <Share2 className="h-4 w-4 text-muted-foreground" />
+                                                )}
                                             </Button>
                                         </div>
                                         <div className="flex items-center gap-2 rounded-xl border border-border bg-background/80 px-3 py-1.5">
