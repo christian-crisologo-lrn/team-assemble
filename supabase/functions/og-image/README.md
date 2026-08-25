@@ -61,7 +61,7 @@ The function resolves the current active sprint for that team, generates the OG 
 1. Accepts a `sprint` query parameter with the sprint ID
 2. Fetches the sprint data, team, roles, and members from Supabase
 3. Generates a crawler-friendly SVG image at 1200x630
-4. Returns `image/svg+xml` so social platforms can use it directly as a preview image
+4. Converts the SVG to PNG (`image/png`) for social-platform unfurl compatibility
 5. Optional `share=1` mode returns HTML with OG tags (pointing at the SVG URL) and redirects humans to the replay URL
 6. Optional `team` mode resolves the latest active sprint for a team when `sprint` is not provided
 

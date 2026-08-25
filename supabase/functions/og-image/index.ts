@@ -123,13 +123,24 @@ serve(async (req) => {
 
     const svg = generateOGImageSVG(team, roles, members, sprint.assignments)
 
-    return new Response(svg, {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'image/svg+xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=300',
-      },
-    })
+    try {
+      const png = await svgToPng(svg)
+      return new Response(png, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'image/png',
+          'Cache-Control': 'public, max-age=300',
+        },
+      })
+    } catch (_error) {
+      return new Response(svg, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=120',
+        },
+      })
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return new Response(JSON.stringify({ error: message }), {
@@ -150,6 +161,19 @@ function escapeXml(value: string): string {
 
 function truncate(value: string, max = 18): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+async function svgToPng(svg: string): Promise<Uint8Array> {
+  const { Resvg } = await import('npm:@resvg/resvg-js@2.6.2')
+  const resvg = new Resvg(svg, {
+    fitTo: {
+      mode: 'width',
+      value: 1200,
+    },
+  })
+
+  const image = resvg.render()
+  return image.asPng()
 }
 
 function generateOGImageSVG(team: any, roles: any[], members: any[], assignments: Record<string, string>) {
@@ -248,6 +272,7 @@ function generateShareCardHTML(input: {
   const imageUrl = new URL(input.requestUrl.toString())
   imageUrl.search = ''
   imageUrl.searchParams.set('sprint', input.sprintId)
+  imageUrl.searchParams.set('format', 'png')
 
   const teamName = truncate(String(input.team?.name || 'Team Assemble'), 28)
   const title = `Team ${teamName} - Sprint Roles`
@@ -270,6 +295,9 @@ function generateShareCardHTML(input: {
     <meta property="og:title" content="${escapeXml(title)}" />
     <meta property="og:description" content="${escapeXml(description)}" />
     <meta property="og:image" content="${escapeXml(imageUrl.toString())}" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeXml(title)}" />
     <meta name="twitter:description" content="${escapeXml(description)}" />
