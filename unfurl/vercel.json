@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/share",
+      "destination": "/api/share"
+    },
+    {
+      "source": "/og",
+      "destination": "/api/og"
+    },
+    {
+      "source": "/planner-csv",
+      "destination": "/api/planner-csv"
+    }
+  ]
+}
