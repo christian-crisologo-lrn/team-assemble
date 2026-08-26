@@ -1,11 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-type Sprint = {
+export type SprintRecord = {
   id: string;
   team_id: string;
   assignments: Record<string, string>;
   start_date: string;
+  end_date: string;
   status: string;
+  name: string;
+  created_at?: string;
 };
 
 type Team = {
@@ -26,7 +29,7 @@ type Member = {
 };
 
 export type ResolvedContext = {
-  sprint: Sprint;
+  sprint: SprintRecord;
   team: Team;
   roles: Role[];
   members: Member[];
@@ -53,7 +56,7 @@ export function buildOrigin(url: URL): string {
   return `${url.protocol}//${url.host}`;
 }
 
-function getSupabaseAdmin() {
+export function getSupabaseAdmin() {
   const supabaseUrl = requiredEnv('SUPABASE_URL');
   const serviceRole = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
 
@@ -66,7 +69,7 @@ export async function resolveContext(params: { teamId?: string | null; sprintId?
   const { teamId, sprintId } = params;
   const supabase = getSupabaseAdmin();
 
-  let sprint: Sprint | null = null;
+  let sprint: SprintRecord | null = null;
 
   if (sprintId) {
     const { data, error } = await supabase
@@ -78,7 +81,7 @@ export async function resolveContext(params: { teamId?: string | null; sprintId?
     if (error || !data) {
       throw new Error('Sprint not found');
     }
-    sprint = data as Sprint;
+    sprint = data as SprintRecord;
   } else {
     if (!teamId) {
       throw new Error('Missing team parameter');
@@ -96,7 +99,7 @@ export async function resolveContext(params: { teamId?: string | null; sprintId?
       throw new Error('Could not resolve active sprint');
     }
 
-    sprint = ((data || [])[0] || null) as Sprint | null;
+    sprint = ((data || [])[0] || null) as SprintRecord | null;
     if (!sprint) {
       throw new Error('No active sprint found for this team');
     }

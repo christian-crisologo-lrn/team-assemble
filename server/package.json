@@ -1,5 +1,5 @@
 {
-  "name": "team-assemble-unfurl",
+  "name": "team-assemble-server",
   "private": true,
   "type": "module",
   "dependencies": {

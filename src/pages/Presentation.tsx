@@ -529,10 +529,10 @@ export default function Presentation() {
         ? `${window.location.origin}/team-assemble/presentation?replay=${replayId}`
         : null;
     const appBase = `${window.location.origin}/team-assemble`;
-    const unfurlBase = import.meta.env.VITE_UNFURL_BASE_URL?.replace(/\/$/, '');
+    const serverBase = import.meta.env.VITE_SERVER_BASE_URL?.replace(/\/$/, '');
     const slackShareUrl = replayId
-        ? (team?.id && unfurlBase
-            ? `${unfurlBase}/share?team=${encodeURIComponent(team.id)}&app=${encodeURIComponent(appBase)}&v=${encodeURIComponent(replayId)}`
+        ? (team?.id && serverBase
+            ? `${serverBase}/share?team=${encodeURIComponent(team.id)}&app=${encodeURIComponent(appBase)}&v=${encodeURIComponent(replayId)}`
             : replayUrl)
         : null;
 

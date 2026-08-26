@@ -83,6 +83,21 @@ yarn preview    # preview production build locally
 yarn lint       # run ESLint
 ```
 
+## Server Deployment
+
+All server-side endpoints are centralized in [server](server) and should be deployed as one Vercel project with Root Directory set to `server`.
+
+Available server endpoints:
+
+- `/share` and `/og` for social link previews
+- `/planner-csv` for server-side CSV export
+
+Client app environment variable:
+
+```env
+VITE_SERVER_BASE_URL=https://your-server-service.vercel.app
+```
+
 ## Project Structure
 
 ```

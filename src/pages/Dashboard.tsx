@@ -56,9 +56,9 @@ export default function Dashboard() {
     const copySlackShare = async (sprintId: string) => {
         const appBase = `${window.location.origin}/team-assemble`;
         const replayUrl = `${appBase}/presentation?replay=${sprintId}`;
-        const unfurlBase = import.meta.env.VITE_UNFURL_BASE_URL?.replace(/\/$/, '');
-        const shareUrl = unfurlBase && currentTeam?.id
-            ? `${unfurlBase}/share?team=${encodeURIComponent(currentTeam.id)}&app=${encodeURIComponent(appBase)}&v=${encodeURIComponent(sprintId)}`
+        const serverBase = import.meta.env.VITE_SERVER_BASE_URL?.replace(/\/$/, '');
+        const shareUrl = serverBase && currentTeam?.id
+            ? `${serverBase}/share?team=${encodeURIComponent(currentTeam.id)}&app=${encodeURIComponent(appBase)}&v=${encodeURIComponent(sprintId)}`
             : replayUrl;
 
         try {

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSprintStore } from '../store/useSprintStore';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -10,10 +10,48 @@ import { addWeekdays } from '../utils/weekday';
 import type { Sprint } from '../types';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { Dialog } from '../components/ui/dialog';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 type SortKey = 'name' | 'start_date' | 'status';
 type SortOrder = 'asc' | 'desc';
+const STATUS_OPTIONS: Sprint['status'][] = ['planning', 'active', 'completed'];
+
+function parseFilterQuery(rawFilter: string | null): {
+    fromDate: string;
+    toDate: string;
+    statuses: Set<Sprint['status']>;
+    hasFilter: boolean;
+} {
+    const filter = rawFilter ? rawFilter.replace(/^"|"$/g, '') : '';
+
+    let fromDate = '';
+    let toDate = '';
+    const statuses = new Set<Sprint['status']>();
+
+    if (!filter) {
+        return { fromDate, toDate, statuses, hasFilter: false };
+    }
+
+    const parts = filter.split(',').map((part) => part.trim()).filter(Boolean);
+    for (const part of parts) {
+        const [keyRaw, ...rest] = part.split('=');
+        const key = keyRaw?.trim();
+        const value = rest.join('=').trim();
+        if (!key || !value) continue;
+
+        if (key === 'start_date') fromDate = value;
+        if (key === 'end_date') toDate = value;
+        if (key === 'status') {
+            value.split('|').forEach((status) => {
+                if (STATUS_OPTIONS.includes(status as Sprint['status'])) {
+                    statuses.add(status as Sprint['status']);
+                }
+            });
+        }
+    }
+
+    return { fromDate, toDate, statuses, hasFilter: true };
+}
 
 function getSprintNameSeed(nameInput: string): { baseName: string; startingNumber: number } {
     const trimmed = nameInput.trim();
@@ -34,7 +72,9 @@ function getSprintNameSeed(nameInput: string): { baseName: string; startingNumbe
 }
 
 export default function SprintPlanner() {
-    const { members, roles, sprints, addSprints, updateSprint, setSprints, deleteSprints } = useSprintStore();
+    const { currentTeam, members, roles, sprints, addSprints, updateSprint, setSprints, deleteSprints } = useSprintStore();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const initialFilters = parseFilterQuery(searchParams.get('filter'));
     const [step, setStep] = useState(0); // 0 = List View, 1 = Config, 2 = Strategy, 3 = Review
     const [editingSprint, setEditingSprint] = useState<Omit<Sprint, 'team_id'> | null>(null);
     const [adjustSubsequentDates, setAdjustSubsequentDates] = useState(false);
@@ -45,10 +85,11 @@ export default function SprintPlanner() {
 
     // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: SortKey, order: SortOrder }>({ key: 'start_date', order: 'asc' });
-    const [statusFilters, setStatusFilters] = useState<Set<Sprint['status']>>(new Set());
-    const [filterFromDate, setFilterFromDate] = useState('');
-    const [filterToDate, setFilterToDate] = useState('');
-    const [showFilters, setShowFilters] = useState(false);
+    const [statusFilters, setStatusFilters] = useState<Set<Sprint['status']>>(new Set(initialFilters.statuses));
+    const [filterFromDate, setFilterFromDate] = useState(initialFilters.fromDate);
+    const [filterToDate, setFilterToDate] = useState(initialFilters.toDate);
+    const [showFilters, setShowFilters] = useState(initialFilters.hasFilter);
+    const exportInFlightRef = useRef(false);
 
     const sortedSprints = useMemo(() => {
         const sorted = [...sprints].sort((a, b) => {
@@ -98,6 +139,40 @@ export default function SprintPlanner() {
     }, [sortedSprints, statusFilters, filterFromDate, filterToDate]);
 
     const hasActiveFilters = statusFilters.size > 0 || !!filterFromDate || !!filterToDate;
+    const serializedFilterParam = useMemo(() => {
+        const parts: string[] = [];
+        if (filterFromDate) parts.push(`start_date=${filterFromDate}`);
+        if (filterToDate) parts.push(`end_date=${filterToDate}`);
+        if (statusFilters.size > 0) parts.push(`status=${Array.from(statusFilters).join('|')}`);
+        return parts.join(',');
+    }, [filterFromDate, filterToDate, statusFilters]);
+
+    const getServerCsvUrl = useCallback(() => {
+        const serverBase = import.meta.env.VITE_SERVER_BASE_URL?.replace(/\/$/, '');
+        if (!serverBase || !currentTeam?.id) return null;
+
+        const params = new URLSearchParams();
+        params.set('team', currentTeam.id);
+
+        if (serializedFilterParam) {
+            params.set('filter', serializedFilterParam);
+        }
+
+        return `${serverBase}/planner-csv?${params.toString()}`;
+    }, [currentTeam, serializedFilterParam]);
+
+    useEffect(() => {
+        const next = new URLSearchParams(searchParams);
+        if (serializedFilterParam) {
+            next.set('filter', serializedFilterParam);
+        } else {
+            next.delete('filter');
+        }
+
+        if (next.toString() !== searchParams.toString()) {
+            setSearchParams(next, { replace: true });
+        }
+    }, [serializedFilterParam, searchParams, setSearchParams]);
 
     const toggleStatusFilter = (status: Sprint['status']) => {
         const next = new Set(statusFilters);
@@ -307,7 +382,7 @@ export default function SprintPlanner() {
                 : addDays(currentStart, durationWeekdays - 1);
             const endStr = end.toISOString();
 
-            let assignments = strategy === 'sequential'
+            const assignments = strategy === 'sequential'
                 ? rotateSequential(members, roles, lastAssignments)
                 : rotateRandom(members, roles, lastAssignments);
 
@@ -335,13 +410,17 @@ export default function SprintPlanner() {
         setDraftSprints([]);
     };
 
-    const SortIcon = ({ column }: { column: SortKey }) => {
+    const getSortIcon = (column: SortKey) => {
         if (sortConfig.key !== column) return <ArrowUpDown className="ml-2 h-3 w-3" />;
         return sortConfig.order === 'asc' ? <ChevronUp className="ml-2 h-3 w-3" /> : <ChevronDown className="ml-2 h-3 w-3" />;
     };
 
-    const exportFilteredToCsv = () => {
-        if (filteredSprints.length === 0) return;
+    const exportFilteredToCsv = useCallback(() => {
+        const serverCsvUrl = getServerCsvUrl();
+        if (serverCsvUrl) {
+            window.location.href = serverCsvUrl;
+            return;
+        }
 
         const escapeCsv = (value: string) => {
             const normalized = value ?? '';
@@ -378,7 +457,31 @@ export default function SprintPlanner() {
         anchor.click();
 
         URL.revokeObjectURL(url);
-    };
+    }, [filteredSprints, getServerCsvUrl, members, roles]);
+
+    useEffect(() => {
+        if (exportInFlightRef.current) return;
+        if (searchParams.get('export') !== 'true') return;
+
+        exportInFlightRef.current = true;
+
+        const serverCsvUrl = getServerCsvUrl();
+        if (serverCsvUrl) {
+            const next = new URLSearchParams(searchParams);
+            next.delete('export');
+            setSearchParams(next, { replace: true });
+            window.location.href = serverCsvUrl;
+            exportInFlightRef.current = false;
+            return;
+        }
+
+        exportFilteredToCsv();
+
+        const next = new URLSearchParams(searchParams);
+        next.delete('export');
+        setSearchParams(next, { replace: true });
+        exportInFlightRef.current = false;
+    }, [searchParams, filteredSprints, roles, members, currentTeam, setSearchParams, serializedFilterParam, exportFilteredToCsv, getServerCsvUrl]);
 
     return (
         <div className="space-y-6">
@@ -457,7 +560,7 @@ export default function SprintPlanner() {
                                     <div className="space-y-1">
                                         <label className="text-xs font-medium text-muted-foreground">Status</label>
                                         <div className="flex h-10 w-full items-center gap-3 rounded-md border border-input bg-background px-3 py-2 text-sm">
-                                            {(['planning', 'active', 'completed'] as Sprint['status'][]).map((status) => (
+                                            {STATUS_OPTIONS.map((status) => (
                                                 <label key={status} className="inline-flex items-center gap-1 text-xs cursor-pointer select-none">
                                                     <input
                                                         type="checkbox"
@@ -665,11 +768,11 @@ export default function SprintPlanner() {
                                                 </th>
                                                 <th className="p-4 w8"></th>
                                                 <th className="p-4 whitespace-nowrap cursor-pointer hover:text-foreground transition-colors" onClick={() => handleSort('name')}>
-                                                    <div className="flex items-center">Sprint Details <SortIcon column="name" /></div>
+                                                    <div className="flex items-center">Sprint Details {getSortIcon('name')}</div>
                                                 </th>
                                                 <th className="p-4">Assignments (Role → Member)</th>
                                                 <th className="p-4 w-22 whitespace-nowrap cursor-pointer hover:text-foreground transition-colors" onClick={() => handleSort('status')}>
-                                                    <div className="flex items-center">Status <SortIcon column="status" /></div>
+                                                    <div className="flex items-center">Status {getSortIcon('status')}</div>
                                                 </th>
                                                 <th className="p-4 w-18 text-right">Actions</th>
                                             </tr>
