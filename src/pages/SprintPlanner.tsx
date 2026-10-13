@@ -153,6 +153,7 @@ export default function SprintPlanner() {
 
         const params = new URLSearchParams();
         params.set('team', currentTeam.id);
+        params.set('format', 'csv');
 
         if (serializedFilterParam) {
             params.set('filter', serializedFilterParam);

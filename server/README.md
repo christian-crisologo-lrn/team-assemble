@@ -19,9 +19,10 @@ Slack/social link unfurling and a public, no-login CSV export of sprint planner 
     (role name -> assigned member name), rendered with
     [`@vercel/og`](https://vercel.com/docs/functions/og-image-generation) (Satori-based,
     no native binaries). Cached with `Cache-Control: public, max-age=3600`.
-- `GET /planner-csv?team=TEAM_ID&filter=...`
-  - Returns filtered planner records as a downloadable CSV (public, no auth — uses the
+- `GET /planner-csv?team=TEAM_ID&filter=...` (default: JSON)
+  - Returns filtered planner records as a JSON array by default (public, no auth — uses the
     Supabase service-role key server-side). `team` is required.
+  - Add `&format=csv` to download the same result as a CSV file.
 
 ### `/planner-csv` filter grammar
 
@@ -35,7 +36,8 @@ The `filter` query param is a comma-separated list of `key=value` pairs. Support
 
 Example: `start_date=2026-08-01,end_date=2026-09-01,status=completed|active`
 
-Unknown keys and unknown status values are ignored. The CSV has a header row and the
+Unknown keys and unknown status values are ignored. By default the response is JSON with an
+array of matching sprint records. If `format=csv` is provided, the CSV has a header row and
 columns `name, start_date, end_date, status, id, team_id`. Values are quoted and embedded
 quotes are doubled, so commas/quotes/newlines are safe.
 
@@ -79,8 +81,14 @@ deployment when `VITE_UNFURL_BASE_URL` is configured.
 https://your-unfurl-service.vercel.app/share?team=86e569a9-18f3-4c05-b4ec-f026741ed93f&app=https%3A%2F%2Fchristian-crisologo-lrn.github.io%2Fteam-assemble
 ```
 
-CSV export endpoint example:
+JSON endpoint example:
 
 ```text
 https://your-unfurl-service.vercel.app/planner-csv?team=86e569a9-18f3-4c05-b4ec-f026741ed93f&filter=start_date=2026-08-01,status=completed|active
+```
+
+CSV export example:
+
+```text
+https://your-unfurl-service.vercel.app/planner-csv?team=86e569a9-18f3-4c05-b4ec-f026741ed93f&filter=start_date=2026-08-01,status=completed|active&format=csv
 ```

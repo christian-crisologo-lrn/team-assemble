@@ -63,10 +63,16 @@ function toCsv(rows: SprintRecord[]): string {
   return [header, ...lines].join('\r\n');
 }
 
+function parseFormat(raw: string | null): 'json' | 'csv' {
+  const value = raw?.trim().toLowerCase();
+  return value === 'csv' ? 'csv' : 'json';
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   try {
     const url = new URL(req.url || '', `http://${req.headers.host}`);
     const teamId = url.searchParams.get('team');
+    const format = parseFormat(url.searchParams.get('format') ?? url.searchParams.get('output'));
 
     if (!teamId) {
       res.statusCode = 400;
@@ -102,12 +108,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
-    const csv = toCsv((data || []) as SprintRecord[]);
+    const rows = (data || []) as SprintRecord[];
+
+    if (format === 'csv') {
+      const csv = toCsv(rows);
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="planner-export.csv"');
+      res.end(csv);
+      return;
+    }
 
     res.statusCode = 200;
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="planner-export.csv"');
-    res.end(csv);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(rows));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
     res.statusCode = message.toLowerCase().includes('missing') ? 400 : 500;
