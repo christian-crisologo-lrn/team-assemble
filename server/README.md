@@ -6,6 +6,8 @@ Slack/social link unfurling and a public, no-login CSV export of sprint planner 
 ## What it does
 
 - `GET /share?team=TEAM_ID&app=ENCODED_APP_BASE` (optional `sprint=SPRINT_ID`)
+  - `ENCODED_APP_BASE` is the app URL URL-encoded in the query string, for example:
+    `app=https%3A%2F%2Fexample.com%2Fteam-assemble`
   - Resolves the sprint via `sprint` if given, otherwise the latest active sprint for `team`.
   - **Crawler detection**: when the `user-agent` header matches a known link-preview bot
     (`slack`, `facebookexternalhit`, `twitterbot`, `discordbot`, `linkedinbot`, `whatsapp`,
@@ -19,14 +21,15 @@ Slack/social link unfurling and a public, no-login CSV export of sprint planner 
     (role name -> assigned member name), rendered with
     [`@vercel/og`](https://vercel.com/docs/functions/og-image-generation) (Satori-based,
     no native binaries). Cached with `Cache-Control: public, max-age=3600`.
-- `GET /planner-csv?team=TEAM_ID&filter=...` (default: JSON)
+- `GET /gt?team=TEAM_ID&filter=...` (default: JSON)
   - Returns filtered planner records as a JSON array by default (public, no auth — uses the
     Supabase service-role key server-side). `team` is required.
   - Each item includes the sprint record plus `roles`, `members`, and `role_assignments`
     with the resolved member names and role names.
   - Add `&format=csv` to download the same result as a CSV file.
+  - This is the active route; the legacy `/planner-csv` path has been removed.
 
-### `/planner-csv` filter grammar
+### `/gt` filter grammar
 
 The `filter` query param is a comma-separated list of `key=value` pairs. Supported keys:
 
@@ -63,19 +66,19 @@ vercel dev           # run the functions locally (requires env vars below)
    - `SUPABASE_SERVICE_ROLE_KEY`
    - Optional: `DEFAULT_APP_BASE_URL` (used when the `app` query param is missing)
 4. Deploy. Vercel compiles the `api/*.ts` / `api/*.tsx` serverless functions automatically;
-   the rewrites in `vercel.json` map `/share`, `/og`, and `/planner-csv` to them.
+   the rewrites in `vercel.json` map `/share`, `/og`, and `/gt` to them.
 
 ## App configuration
 
 In the main app `.env`, set:
 
 ```env
-VITE_UNFURL_BASE_URL=https://your-unfurl-service.vercel.app
+VITE_SERVER_BASE_URL=https://your-unfurl-service.vercel.app
 ```
 
 Then the app's "Copy Slack share" buttons will copy a Vercel `/share` link instead of a
-Supabase function URL. Planner CSV export (`export=true`) will also use this same Vercel
-deployment when `VITE_UNFURL_BASE_URL` is configured.
+Supabase function URL. Planner exports will also use this same Vercel deployment when
+`VITE_SERVER_BASE_URL` is configured.
 
 ## Example links
 
@@ -86,11 +89,11 @@ https://your-unfurl-service.vercel.app/share?team=86e569a9-18f3-4c05-b4ec-f02674
 JSON endpoint example:
 
 ```text
-https://your-unfurl-service.vercel.app/planner-csv?team=86e569a9-18f3-4c05-b4ec-f026741ed93f&filter=start_date=2026-08-01,status=completed|active
+https://your-unfurl-service.vercel.app/gt?team=86e569a9-18f3-4c05-b4ec-f026741ed93f&filter=start_date=2026-08-01,status=completed|active
 ```
 
 CSV export example:
 
 ```text
-https://your-unfurl-service.vercel.app/planner-csv?team=86e569a9-18f3-4c05-b4ec-f026741ed93f&filter=start_date=2026-08-01,status=completed|active&format=csv
+https://your-unfurl-service.vercel.app/gt?team=86e569a9-18f3-4c05-b4ec-f026741ed93f&filter=start_date=2026-08-01,status=completed|active&format=csv
 ```

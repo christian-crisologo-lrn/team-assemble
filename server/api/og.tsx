@@ -13,6 +13,44 @@ function statusFromError(message: string): number {
   return 500;
 }
 
+const TAILWIND_COLOR_MAP: Record<string, string> = {
+  'bg-red-500': '#ef4444',
+  'bg-red-600': '#dc2626',
+  'bg-blue-500': '#3b82f6',
+  'bg-blue-600': '#2563eb',
+  'bg-green-500': '#22c55e',
+  'bg-green-600': '#16a34a',
+  'bg-yellow-500': '#eab308',
+  'bg-yellow-600': '#ca8a04',
+  'bg-purple-500': '#a855f7',
+  'bg-purple-600': '#9333ea',
+  'bg-pink-500': '#ec4899',
+  'bg-pink-600': '#db2777',
+  'bg-indigo-500': '#6366f1',
+  'bg-indigo-600': '#4f46e5',
+  'bg-slate-500': '#64748b',
+  'bg-slate-600': '#475569',
+  'bg-cyan-500': '#06b6d4',
+  'bg-teal-500': '#14b8a6',
+  'bg-orange-500': '#f97316',
+  'bg-rose-500': '#f43f5e',
+  'bg-amber-500': '#f59e0b',
+  'bg-emerald-500': '#10b981',
+};
+
+function normalizeRoleColor(color?: string): string {
+  const value = (color || '').trim();
+  if (!value) {
+    return '#38bdf8';
+  }
+
+  if (value.startsWith('#')) {
+    return value;
+  }
+
+  return TAILWIND_COLOR_MAP[value] || '#38bdf8';
+}
+
 function buildPairs(context: ResolvedContext): Array<{ role: string; member: string; color?: string }> {
   const { roles, members, sprint } = context;
   const memberById = new Map(members.map((member) => [member.id, member.name]));
@@ -21,7 +59,7 @@ function buildPairs(context: ResolvedContext): Array<{ role: string; member: str
   return roles.map((role) => {
     const memberId = assignments[role.id];
     const memberName = (memberId && memberById.get(memberId)) || 'Unassigned';
-    return { role: role.name, member: memberName, color: role.color };
+    return { role: role.name, member: memberName, color: normalizeRoleColor(role.color) };
   });
 }
 
@@ -54,7 +92,7 @@ function renderCard(context: ResolvedContext) {
                 height: '16px',
                 borderRadius: '8px',
                 marginRight: '18px',
-                background: pair.color || '#38bdf8',
+                background: normalizeRoleColor(pair.color),
               }}
             />
             <div style={{ display: 'flex', color: '#cbd5e1', width: '340px' }}>{pair.role}</div>

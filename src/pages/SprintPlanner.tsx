@@ -159,7 +159,7 @@ export default function SprintPlanner() {
             params.set('filter', serializedFilterParam);
         }
 
-        return `${serverBase}/planner-csv?${params.toString()}`;
+        return `${serverBase}/gt?${params.toString()}`;
     }, [currentTeam, serializedFilterParam]);
 
     useEffect(() => {

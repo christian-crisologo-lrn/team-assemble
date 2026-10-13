@@ -9,7 +9,7 @@
       "destination": "/api/og"
     },
     {
-      "source": "/planner-csv",
+      "source": "/gt",
       "destination": "/api/planner-csv"
     }
   ]

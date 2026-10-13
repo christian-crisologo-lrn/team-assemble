@@ -90,7 +90,7 @@ All server-side endpoints are centralized in [server](server) and should be depl
 Available server endpoints:
 
 - `/share` and `/og` for social link previews
-- `/planner-csv` for server-side CSV export
+- `/gt` for filtered planner data export in JSON (default) or CSV via `?format=csv`
 
 Client app environment variable:
 
