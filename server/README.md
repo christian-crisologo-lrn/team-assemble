@@ -43,8 +43,9 @@ Example: `start_date=2026-08-01,end_date=2026-09-01,status=completed|active`
 
 Unknown keys and unknown status values are ignored. By default the response is JSON with an
 array of matching sprint records. If `format=csv` is provided, the CSV has a header row and
-columns `name, start_date, end_date, status, id, team_id`. Values are quoted and embedded
-quotes are doubled, so commas/quotes/newlines are safe.
+columns `name, start_date, end_date, status, assignments, id, team_id`. The `assignments`
+column contains role-to-member text such as `Developer: Alice | QA: Bob`. Values are quoted and
+embedded quotes are doubled, so commas/quotes/newlines are safe.
 
 ## Local development
 

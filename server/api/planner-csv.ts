@@ -55,11 +55,34 @@ function escapeCsv(value: unknown): string {
   return `"${str.replaceAll('"', '""')}"`;
 }
 
-const CSV_COLUMNS: Array<keyof SprintRecord> = ['name', 'start_date', 'end_date', 'status', 'id', 'team_id'];
+const CSV_COLUMNS: Array<'name' | 'start_date' | 'end_date' | 'status' | 'assignments' | 'id' | 'team_id'> = ['name', 'start_date', 'end_date', 'status', 'assignments', 'id', 'team_id'];
 
-function toCsv(rows: SprintRecord[]): string {
+function describeAssignments(row: SprintRecord, roles: Array<{ id: string; name: string }>, memberById: Map<string, { id: string; name: string }>): string {
+  const assignments = row.assignments || {};
+  return roles
+    .map((role) => {
+      const memberId = assignments[role.id];
+      const member = memberId ? memberById.get(memberId) : null;
+      return `${role.name}: ${member?.name || 'Unassigned'}`;
+    })
+    .join(' | ');
+}
+
+function toCsv(rows: SprintRecord[], roles: Array<{ id: string; name: string }>, memberById: Map<string, { id: string; name: string }>): string {
   const header = CSV_COLUMNS.join(',');
-  const lines = rows.map((row) => CSV_COLUMNS.map((column) => escapeCsv(row[column])).join(','));
+  const lines = rows.map((row) => {
+    const values: Record<typeof CSV_COLUMNS[number], string> = {
+      name: row.name,
+      start_date: row.start_date,
+      end_date: row.end_date,
+      status: row.status,
+      assignments: describeAssignments(row, roles, memberById),
+      id: row.id,
+      team_id: row.team_id,
+    };
+
+    return CSV_COLUMNS.map((column) => escapeCsv(values[column])).join(',');
+  });
   return [header, ...lines].join('\r\n');
 }
 
@@ -125,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const memberById = new Map(members.map((member) => [member.id, member]));
 
     if (format === 'csv') {
-      const csv = toCsv(rows);
+      const csv = toCsv(rows, roles, memberById);
 
       res.statusCode = 200;
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
