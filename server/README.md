@@ -22,6 +22,8 @@ Slack/social link unfurling and a public, no-login CSV export of sprint planner 
 - `GET /planner-csv?team=TEAM_ID&filter=...` (default: JSON)
   - Returns filtered planner records as a JSON array by default (public, no auth — uses the
     Supabase service-role key server-side). `team` is required.
+  - Each item includes the sprint record plus `roles`, `members`, and `role_assignments`
+    with the resolved member names and role names.
   - Add `&format=csv` to download the same result as a CSV file.
 
 ### `/planner-csv` filter grammar

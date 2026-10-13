@@ -86,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     let query = supabase
       .from('lrn_sprints')
-      .select('id, team_id, name, start_date, end_date, status')
+      .select('id, team_id, name, start_date, end_date, status, assignments')
       .eq('team_id', teamId)
       .order('start_date', { ascending: true });
 
@@ -100,7 +100,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       query = query.in('status', filters.statuses);
     }
 
-    const { data, error } = await query;
+    const [sprintsRes, rolesRes, membersRes] = await Promise.all([
+      query,
+      supabase.from('lrn_roles').select('id, name, color').eq('team_id', teamId).order('created_at', { ascending: true }),
+      supabase.from('lrn_team_members').select('member_id, lrn_members(id, name, avatar_url)').eq('team_id', teamId),
+    ]);
+
+    const { data, error } = sprintsRes;
     if (error) {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -109,6 +115,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const rows = (data || []) as SprintRecord[];
+    const roles = (rolesRes.data || []) as Array<{ id: string; name: string; color?: string }>;
+    const members = ((membersRes.data || []) as Array<{
+      lrn_members?: { id: string; name: string; avatar_url?: string } | { id: string; name: string; avatar_url?: string }[] | null;
+    }>)
+      .flatMap((entry) => (Array.isArray(entry.lrn_members) ? entry.lrn_members : entry.lrn_members ? [entry.lrn_members] : []));
+
+    const roleById = new Map(roles.map((role) => [role.id, role]));
+    const memberById = new Map(members.map((member) => [member.id, member]));
 
     if (format === 'csv') {
       const csv = toCsv(rows);
@@ -120,9 +134,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return;
     }
 
+    const jsonRows = rows.map((row) => {
+      const assignments = row.assignments || {};
+      const roleAssignments = Object.entries(assignments)
+        .map(([roleId, memberId]) => {
+          const role = roleById.get(roleId);
+          const member = memberId ? memberById.get(memberId) : null;
+
+          return {
+            role_id: roleId,
+            role_name: role?.name ?? null,
+            member_id: memberId ?? null,
+            member_name: member?.name ?? null,
+            color: role?.color ?? null,
+          };
+        })
+        .filter((item) => item.role_name || item.member_name);
+
+      return {
+        ...row,
+        roles: roles.map((role) => ({
+          id: role.id,
+          name: role.name,
+          color: role.color ?? null,
+          member_id: assignments[role.id] ?? null,
+          member_name: assignments[role.id] ? memberById.get(assignments[role.id])?.name ?? null : null,
+        })),
+        members: members.map((member) => ({
+          id: member.id,
+          name: member.name,
+          avatar_url: member.avatar_url ?? null,
+        })),
+        role_assignments: roleAssignments,
+      };
+    });
+
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify(rows));
+    res.end(JSON.stringify(jsonRows));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
     res.statusCode = message.toLowerCase().includes('missing') ? 400 : 500;
