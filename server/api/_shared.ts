@@ -115,9 +115,8 @@ export async function resolveContext(params: { teamId?: string | null; sprintId?
     throw new Error('Team not found');
   }
 
-  const members = (membersRes.data || [])
-    .map((entry: { lrn_members: Member | null }) => entry.lrn_members)
-    .filter(Boolean) as Member[];
+  const members = ((membersRes.data || []) as Array<{ lrn_members: Member | Member[] | null }>)
+    .flatMap((entry) => (Array.isArray(entry.lrn_members) ? entry.lrn_members : entry.lrn_members ? [entry.lrn_members] : []));
 
   return {
     sprint,

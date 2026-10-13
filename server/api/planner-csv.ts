@@ -1,130 +1,117 @@
-import { format } from 'date-fns';
-import { getSupabaseAdmin, type SprintRecord } from './_shared';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getSupabaseAdmin, type SprintRecord } from './_shared.js';
 
-export const config = {
-  runtime: 'edge',
+const ALLOWED_STATUSES = new Set(['planning', 'active', 'completed']);
+
+type ParsedFilters = {
+  startDate?: string;
+  endDate?: string;
+  statuses?: string[];
 };
 
-type PlannerStatus = 'planning' | 'active' | 'completed';
-const STATUS_OPTIONS: PlannerStatus[] = ['planning', 'active', 'completed'];
+function parseFilters(raw: string | null): ParsedFilters {
+  const filters: ParsedFilters = {};
+  if (!raw) {
+    return filters;
+  }
 
-function parseFilter(url: URL): { fromDate: Date | null; toDate: Date | null; statuses: Set<PlannerStatus> } {
-  const raw = url.searchParams.get('filter');
-  const filter = raw ? raw.replace(/^"|"$/g, '') : '';
+  for (const pair of raw.split(',')) {
+    const trimmed = pair.trim();
+    if (!trimmed) {
+      continue;
+    }
 
-  let fromDate: Date | null = null;
-  let toDate: Date | null = null;
-  const statuses = new Set<PlannerStatus>();
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) {
+      continue;
+    }
 
-  if (!filter) return { fromDate, toDate, statuses };
-
-  const parts = filter.split(',').map((part) => part.trim()).filter(Boolean);
-  for (const part of parts) {
-    const [keyRaw, ...rest] = part.split('=');
-    const key = keyRaw?.trim();
-    const value = rest.join('=').trim();
-    if (!key || !value) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (!value) {
+      continue;
+    }
 
     if (key === 'start_date') {
-      fromDate = new Date(`${value}T00:00:00`);
+      filters.startDate = value;
     } else if (key === 'end_date') {
-      toDate = new Date(`${value}T23:59:59.999`);
+      filters.endDate = value;
     } else if (key === 'status') {
-      value.split('|').forEach((status) => {
-        if (STATUS_OPTIONS.includes(status as PlannerStatus)) {
-          statuses.add(status as PlannerStatus);
-        }
-      });
+      const statuses = value
+        .split('|')
+        .map((status) => status.trim().toLowerCase())
+        .filter((status) => ALLOWED_STATUSES.has(status));
+      if (statuses.length > 0) {
+        filters.statuses = statuses;
+      }
     }
   }
 
-  return { fromDate, toDate, statuses };
+  return filters;
 }
 
-function escapeCsv(value: string): string {
-  const normalized = value ?? '';
-  if (/[",\n]/.test(normalized)) {
-    return `"${normalized.replace(/"/g, '""')}"`;
-  }
-  return normalized;
+function escapeCsv(value: unknown): string {
+  const str = value == null ? '' : String(value);
+  return `"${str.replaceAll('"', '""')}"`;
 }
 
-function filterSprints(sprints: SprintRecord[], fromDate: Date | null, toDate: Date | null, statuses: Set<PlannerStatus>) {
-  return sprints.filter((sprint) => {
-    if (statuses.size > 0 && !statuses.has(sprint.status as PlannerStatus)) {
-      return false;
-    }
+const CSV_COLUMNS: Array<keyof SprintRecord> = ['name', 'start_date', 'end_date', 'status', 'id', 'team_id'];
 
-    const sprintStart = new Date(sprint.start_date);
-    const sprintEnd = new Date(sprint.end_date);
-
-    if (fromDate && sprintEnd < fromDate) return false;
-    if (toDate && sprintStart > toDate) return false;
-
-    return true;
-  });
+function toCsv(rows: SprintRecord[]): string {
+  const header = CSV_COLUMNS.join(',');
+  const lines = rows.map((row) => CSV_COLUMNS.map((column) => escapeCsv(row[column])).join(','));
+  return [header, ...lines].join('\r\n');
 }
 
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   try {
-    const url = new URL(req.url);
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
     const teamId = url.searchParams.get('team');
+
     if (!teamId) {
-      return new Response('Missing team parameter', { status: 400 });
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end('Missing team parameter');
+      return;
     }
 
-    const { fromDate, toDate, statuses } = parseFilter(url);
+    const filters = parseFilters(url.searchParams.get('filter'));
     const supabase = getSupabaseAdmin();
 
-    const [sprintsRes, rolesRes, membersRes] = await Promise.all([
-      supabase.from('lrn_sprints').select('*').eq('team_id', teamId).order('start_date', { ascending: true }),
-      supabase.from('lrn_roles').select('id, name').eq('team_id', teamId).order('created_at', { ascending: true }),
-      supabase.from('lrn_team_members').select('member_id, lrn_members(id, name)').eq('team_id', teamId),
-    ]);
+    let query = supabase
+      .from('lrn_sprints')
+      .select('id, team_id, name, start_date, end_date, status')
+      .eq('team_id', teamId)
+      .order('start_date', { ascending: true });
 
-    if (sprintsRes.error) {
-      return new Response(`Could not load sprints: ${sprintsRes.error.message}`, { status: 500 });
+    if (filters.startDate) {
+      query = query.gte('start_date', filters.startDate);
+    }
+    if (filters.endDate) {
+      query = query.lte('end_date', filters.endDate);
+    }
+    if (filters.statuses && filters.statuses.length > 0) {
+      query = query.in('status', filters.statuses);
     }
 
-    const sprints = (sprintsRes.data || []) as SprintRecord[];
-    const filtered = filterSprints(sprints, fromDate, toDate, statuses);
+    const { data, error } = await query;
+    if (error) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end('Could not load planner records');
+      return;
+    }
 
-    const roles = (rolesRes.data || []) as Array<{ id: string; name: string }>;
-    const members = ((membersRes.data || []) as Array<{ lrn_members: { id: string; name: string } | null }>)
-      .map((entry) => entry.lrn_members)
-      .filter(Boolean) as Array<{ id: string; name: string }>;
+    const csv = toCsv((data || []) as SprintRecord[]);
 
-    const headers = ['Sprint Name', 'Start Date', 'End Date', 'Status', 'Assignments'];
-    const rows = filtered.map((sprint) => {
-      const assignments = roles.map((role) => {
-        const memberId = sprint.assignments[role.id];
-        const member = members.find((m) => m.id === memberId);
-        return `${role.name}: ${member?.name || 'Unassigned'}`;
-      }).join(' | ');
-
-      return [
-        sprint.name,
-        format(new Date(sprint.start_date), 'yyyy-MM-dd'),
-        format(new Date(sprint.end_date), 'yyyy-MM-dd'),
-        sprint.status,
-        assignments,
-      ].map(escapeCsv).join(',');
-    });
-
-    const csv = [headers.join(','), ...rows].join('\n');
-
-    return new Response(csv, {
-      headers: {
-        'content-type': 'text/csv; charset=utf-8',
-        'content-disposition': `attachment; filename="sprint-planner-${format(new Date(), 'yyyyMMdd-HHmmss')}.csv"`,
-        'cache-control': 'no-store',
-      },
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-    });
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="planner-export.csv"');
+    res.end(csv);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unexpected error';
+    res.statusCode = message.toLowerCase().includes('missing') ? 400 : 500;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end(message);
   }
 }

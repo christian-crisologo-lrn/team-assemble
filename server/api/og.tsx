@@ -1,97 +1,94 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ImageResponse } from '@vercel/og';
-import { resolveContext } from './_shared';
+import { resolveContext, type ResolvedContext } from './_shared.js';
 
-export const config = {
-  runtime: 'edge',
-};
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+function statusFromError(message: string): number {
+  const lower = message.toLowerCase();
+  if (lower.includes('not found') || lower.includes('no active sprint')) {
+    return 404;
+  }
+  if (lower.includes('missing')) {
+    return 400;
+  }
+  return 500;
 }
 
-export default async function handler(req: Request): Promise<Response> {
+function buildPairs(context: ResolvedContext): Array<{ role: string; member: string; color?: string }> {
+  const { roles, members, sprint } = context;
+  const memberById = new Map(members.map((member) => [member.id, member.name]));
+  const assignments = sprint.assignments || {};
+
+  return roles.map((role) => {
+    const memberId = assignments[role.id];
+    const memberName = (memberId && memberById.get(memberId)) || 'Unassigned';
+    return { role: role.name, member: memberName, color: role.color };
+  });
+}
+
+function renderCard(context: ResolvedContext) {
+  const pairs = buildPairs(context);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
+        padding: '60px',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+        color: '#f8fafc',
+        fontFamily: 'sans-serif',
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', marginBottom: '32px' }}>
+        <div style={{ fontSize: 32, color: '#94a3b8', marginBottom: '8px' }}>{context.team.name}</div>
+        <div style={{ fontSize: 56, fontWeight: 700 }}>{context.sprint.name}</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {pairs.slice(0, 8).map((pair, index) => (
+          <div key={index} style={{ display: 'flex', alignItems: 'center', fontSize: 30 }}>
+            <div
+              style={{
+                width: '16px',
+                height: '16px',
+                borderRadius: '8px',
+                marginRight: '18px',
+                background: pair.color || '#38bdf8',
+              }}
+            />
+            <div style={{ display: 'flex', color: '#cbd5e1', width: '340px' }}>{pair.role}</div>
+            <div style={{ display: 'flex', fontWeight: 600 }}>{pair.member}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   try {
-    const url = new URL(req.url);
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
     const teamId = url.searchParams.get('team');
     const sprintId = url.searchParams.get('sprint');
 
-    const { sprint, team, roles, members } = await resolveContext({ teamId, sprintId });
+    const context = await resolveContext({ teamId, sprintId });
 
-    return new ImageResponse(
-      (
-        <div
-          style={{
-            width: 1200,
-            height: 630,
-            display: 'flex',
-            flexDirection: 'column',
-            background: 'linear-gradient(135deg, #0f172a 0%, #4c1d95 55%, #1e1b4b 100%)',
-            color: 'white',
-            padding: 48,
-            fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 24 }}>
-            <div style={{ fontSize: 52, fontWeight: 800 }}>Team {truncate(team.name, 24)}</div>
-            <div style={{ fontSize: 24, color: '#ddd6fe', marginTop: 8 }}>Current Sprint Roles</div>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-            {roles.slice(0, 8).map((role) => {
-              const memberId = sprint.assignments[role.id];
-              const member = members.find((m) => m.id === memberId);
-              const initial = member?.name ? member.name.charAt(0).toUpperCase() : '?';
-
-              return (
-                <div
-                  key={role.id}
-                  style={{
-                    width: 260,
-                    height: 170,
-                    borderRadius: 16,
-                    background: 'rgba(15,23,42,0.58)',
-                    border: '1px solid rgba(196,181,253,0.5)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    padding: 18,
-                    gap: 12,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: '50%',
-                        background: 'rgba(168,85,247,0.35)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 800,
-                      }}
-                    >
-                      {initial}
-                    </div>
-                    <div style={{ fontSize: 18, color: '#e9d5ff', fontWeight: 700 }}>{truncate(role.name, 18)}</div>
-                  </div>
-                  <div style={{ fontSize: 28, fontWeight: 700 }}>{truncate(member?.name || 'Unassigned', 18)}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ),
-      {
-        width: 1200,
-        height: 630,
-      }
-    );
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: message }), {
-      status: message.includes('not found') || message.includes('No active sprint') ? 404 : 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+    const image = new ImageResponse(renderCard(context), {
+      width: 1200,
+      height: 630,
     });
+
+    const arrayBuffer = await image.arrayBuffer();
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.end(Buffer.from(arrayBuffer));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unexpected error';
+    res.statusCode = statusFromError(message);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end(message);
   }
 }
